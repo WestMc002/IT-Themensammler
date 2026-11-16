@@ -247,18 +247,30 @@ Termins) für den Vor-Ort-Termin.
 - Fällt der Dienst aus, startet Windows ihn neu (nach 1, 1 und 5 Minuten).
 
 Updates
-- Der Dienst sieht alle 6 Stunden nach, ob eine Prüfung fällig ist, und fragt
-  dann höchstens alle 20 Stunden die öffentliche GitHub-Seite des Programms
-  nach einer neuen Version (ohne Anmeldung, es werden keine Daten übertragen).
-  Gibt es eine, steht für Admins oben in der Verwaltung der Weboberfläche ein
-  Hinweis; im Protokoll steht "Update verfügbar".
-- Das Verwaltungsfenster prüft beim Start ebenso und zeigt bei einer neuen
-  Version oben die Leiste "Neue Version x verfügbar" mit "Jetzt aktualisieren",
-  "Release-Seite" und "Später". Im Info-Fenster (Klick auf die Version) stehen
-  Stand und letzte Prüfung, "Jetzt prüfen" und der Schalter "Automatisch prüfen"
-  (gilt auch für den Dienst). Ist die Prüfung nicht möglich, steht dort eine
-  kurze Meldung (z. B. "Keine Verbindung."); "Details" klappt den genauen
-  Fehlertext auf, der sich markieren und kopieren lässt.
+- Kurz nach jedem Start (etwa 15 Sekunden) wird still auf der öffentlichen
+  GitHub-Seite des Programms nach einer neuen Version gesehen – vom Dienst und
+  vom Verwaltungsfenster (ohne Anmeldung, es werden keine Daten übertragen).
+  Danach sieht der Dienst alle 6 Stunden nach, wenn die letzte Prüfung mehr
+  als 20 Stunden her ist. Gibt es eine neue Version, steht für Admins oben in
+  der Verwaltung der Weboberfläche ein Hinweis; im Protokoll steht "Update
+  verfügbar".
+- Das Verwaltungsfenster zeigt bei einer neuen Version oben die Leiste "Neue
+  Version x verfügbar" mit "Jetzt aktualisieren", "Release-Seite" und
+  "Später". Im Info-Fenster (Klick auf die Version) stehen Stand und letzte
+  Prüfung, "Jetzt prüfen" und die Schalter "Automatisch prüfen" und
+  "Automatisch aktualisieren" (gelten auch für den Dienst). Ist die Prüfung
+  nicht möglich, steht dort eine kurze Meldung (z. B. "Keine Verbindung.");
+  "Details" klappt den genauen Fehlertext auf, der sich markieren und
+  kopieren lässt.
+- "Automatisch aktualisieren" (Standard: aus, nur zusammen mit "Automatisch
+  prüfen"): Eine neue Version wird ohne Rückfrage installiert. Das übernimmt
+  der Dienst; er wartet, bis nichts los ist (Verwaltungsfenster zu, kein
+  AD-Abgleich, in den letzten 5 Minuten keine Änderung in der Weboberfläche)
+  und versucht es sonst alle 5 Minuten erneut. Der Dienst wird dabei kurz
+  beendet und startet danach von selbst neu; das Ergebnis steht im
+  Protokoll. Ohne laufenden Dienst aktualisiert sich das Verwaltungsfenster
+  selbst und startet neu. Liegt es unter "Programme" und läuft nicht als
+  Dienst, fragt Windows dabei jedes Mal nach Administratorrechten.
 - "Jetzt aktualisieren" lädt das ZIP des Releases, beendet das
   Verwaltungsfenster und den Dienst, ersetzt Programm und Liesmich im
   Programmordner des Dienstes (C:\Program Files\reitzner IT-Themensammler,
@@ -281,6 +293,8 @@ Akzentfarbe aus Windows). Weboberfläche mit reitzner-Grün, hell/dunkel folgt
 Windows. Überall das reitzner-Logo (reitzner-Projekt).
 
 Versionen
+1.22  Update-Prüfung kurz nach jedem Start; „Automatisch aktualisieren“ (der
+      Dienst installiert neue Versionen selbst, sobald nichts los ist)
 1.21  Info-Fenster: Zeile „Updates“ neu (gleiches Raster wie die Zeilen darüber,
       kurze Meldungen, „Details“ mit dem genauen Fehlertext zum Aufklappen,
       „Nur Vorabversionen“, wenn noch keine fertige Version veröffentlicht ist)

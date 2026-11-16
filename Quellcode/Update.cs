@@ -30,7 +30,8 @@ namespace ITThemensammler
     /// Fragt nur die öffentliche GitHub-Schnittstelle ab (keine Anmeldung, es werden keine Daten übertragen).
     /// Selbst-Update aus dem Verwaltungsfenster: ZIP laden, Hilfsskript starten, Fenster beenden. Das Skript beendet den Dienst,
     /// ersetzt EXE und Liesmich im Programmordner des Dienstes (sonst neben dem Verwaltungsfenster), startet den Dienst wieder
-    /// und öffnet das Verwaltungsfenster neu. Der Dienst selbst prüft nur und meldet eine neue Version in der Weboberfläche.
+    /// und öffnet das Verwaltungsfenster neu. Mit "Automatisch aktualisieren" installiert der Dienst neue Versionen selbst
+    /// (das Skript beendet und startet dann nur den Dienst).
     /// </summary>
     internal static class UpdateCheck
     {
@@ -149,7 +150,13 @@ namespace ITThemensammler
         /// ZIP herunterladen, Hilfsskript schreiben und starten. Das Skript wartet, bis dieses Programm beendet ist,
         /// ersetzt EXE und Liesmich und startet das Programm neu. Danach muss der Aufrufer das Programm beenden.
         /// </summary>
-        public static async Task Install(UpdateInfo release, Action<int> progress)
+        public static Task Install(UpdateInfo release, Action<int> progress)
+        {
+            return Install(release, progress, false);
+        }
+
+        /// <summary>ausDienst: vom Dienst selbst (automatisches Update) – das Skript beendet und startet nur den Dienst.</summary>
+        public static async Task Install(UpdateInfo release, Action<int> progress, bool ausDienst)
         {
             if (string.IsNullOrEmpty(release.ZipUrl)) throw new Exception("Im Release ist keine ZIP-Datei angehängt.");
             string blocker = InstallBlocker();
@@ -172,12 +179,12 @@ namespace ITThemensammler
             string exe = dienst ? DienstSteuerung.ProgrammPfad : Application.ExecutablePath;
             string target = Path.GetDirectoryName(exe);
             var start = new ProcessStartInfo("powershell.exe",
-                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" -ProcessId " + Process.GetCurrentProcess().Id +
+                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" -ProcessId " + (ausDienst ? 0 : Process.GetCurrentProcess().Id) +
                 " -Zip \"" + zip + "\" -Exe \"" + exe + "\" -Version \"" + release.Version + "\"" +
-                (dienst ? " -Service \"" + Dienst.DienstName + "\"" : ""))
+                (dienst ? " -Service \"" + Dienst.DienstName + "\"" : "") + (ausDienst ? " -NoStart" : ""))
             { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden };
             // Programmordner ohne Schreibrechte (z. B. unter Programme): Hilfsskript mit Administratorrechten starten
-            if (!CanWrite(target)) start.Verb = "runas";
+            if (!ausDienst && !CanWrite(target)) start.Verb = "runas";
             try { Process.Start(start); }
             catch (System.ComponentModel.Win32Exception ex)
             {
@@ -194,14 +201,14 @@ namespace ITThemensammler
         }
 
         private const string Script = @"# reitzner IT-Themensammler – Update (wird vom Programm erzeugt)
-param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version,[string]$Service)
+param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version,[string]$Service,[switch]$NoStart)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $PSScriptRoot 'Update.log'
 $name = Split-Path $Exe -Leaf
 $target = Split-Path $Exe -Parent
 $stopped = $false
 try {
-  try { Wait-Process -Id $ProcessId -Timeout 60 -ErrorAction SilentlyContinue } catch {}
+  if ($ProcessId -gt 0) { try { Wait-Process -Id $ProcessId -Timeout 60 -ErrorAction SilentlyContinue } catch {} }
   Start-Sleep -Milliseconds 500
   $dir = Join-Path $PSScriptRoot 'Neu'
   if (Test-Path $dir) { Remove-Item $dir -Recurse -Force }
@@ -230,7 +237,7 @@ try {
   ('FEHLER ' + $_.Exception.Message) | Out-File $log -Encoding utf8
 }
 if ($stopped) { try { Start-Service -Name $Service } catch { ('FEHLER Dienst startet nicht: ' + $_.Exception.Message) | Out-File $log -Encoding utf8 } }
-Start-Process -FilePath $Exe -ArgumentList '--nach-update'
+if (-not $NoStart) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
 ";
 
         /// <summary>Aus dem Release-Text nur den Abschnitt "## Änderungen", Punkte als "•", ohne Markdown.</summary>
@@ -262,11 +269,17 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
 
     /// <summary>
     /// Gemeinsamer Stand der Update-Prüfung von Dienst und Verwaltungsfenster (in einstellungen.json):
-    /// automatisch höchstens alle 20 Stunden; der Dienst sieht alle 6 Stunden nach, ob die Prüfung fällig ist.
+    /// automatisch etwa 15 Sekunden nach jedem Start (ohne Sperre), danach alle 6 Stunden, wenn die letzte Prüfung
+    /// mindestens 20 Stunden her ist. Mit "Automatisch aktualisieren" installiert der Dienst eine neue Version selbst,
+    /// sobald nichts los ist (sonst alle 5 Minuten ein neuer Versuch).
     /// </summary>
     internal static class UpdatePruefung
     {
-        private static System.Threading.Timer _timer;
+        private static System.Threading.Timer _timer, _installTimer;
+        private static bool _ersterLauf;
+        private static int _installiert; // 1 = Update ist gestartet, der Dienst wird gleich beendet
+        /// <summary>Vom Dienst gestartetes Update: das Ergebnis meldet der Dienst nach dem Neustart.</summary>
+        private static string Marker { get { return Path.Combine(UpdateCheck.Folder, "Dienst-Update.txt"); } }
 
         public static DateTime Letzte
         {
@@ -282,6 +295,13 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
         {
             get { return Speicher.EinstellungenLesen().updateAuto != false; }
             set { Speicher.EinstellungenAendern(e => e.updateAuto = value); }
+        }
+
+        /// <summary>Neue Version ohne Rückfrage installieren (nur zusammen mit "Automatisch prüfen").</summary>
+        public static bool AutoInstall
+        {
+            get { return Speicher.EinstellungenLesen().updateAutoInstall == true; }
+            set { Speicher.EinstellungenAendern(e => e.updateAutoInstall = value); }
         }
 
         /// <summary>Automatische Prüfung eingeschaltet und die letzte mindestens 20 Stunden her?</summary>
@@ -304,24 +324,37 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
             return info;
         }
 
-        /// <summary>Im Dienst: 5 Minuten nach dem Start, danach alle 6 Stunden nachsehen, ob die Prüfung fällig ist.</summary>
+        /// <summary>
+        /// Im Dienst: etwa 15 Sekunden nach dem Start prüfen (ohne 20-Stunden-Sperre), danach alle 6 Stunden nachsehen,
+        /// ob die Prüfung fällig ist. Alle 5 Minuten: neue Version automatisch installieren, wenn eingeschaltet und nichts los ist.
+        /// </summary>
         public static void DienstStarten()
         {
             DienstBeenden();
+            if (Demo.Active) return;
+            UpdateErgebnisMelden();
+            _ersterLauf = true;
             _timer = new System.Threading.Timer(o =>
             {
+                bool start = _ersterLauf;
+                _ersterLauf = false;
                 try
                 {
-                    if (!Faellig()) return;
+                    if (!Auto || (!start && !Faellig())) return;
                     var info = Pruefen();
-                    if (UpdateCheck.IsNewer(info.Version)) Speicher.Protokoll("Update verfügbar: Version " + info.Version + " (installiert: " + AppInfo.Version + ")");
+                    if (UpdateCheck.IsNewer(info.Version))
+                    {
+                        Speicher.Protokoll("Update verfügbar: Version " + info.Version + " (installiert: " + AppInfo.Version + ")");
+                        DienstAutoUpdate();
+                    }
                 }
                 catch (Exception ex)
                 {
                     string more = ex.Data["Detail"] as string;
                     Speicher.Protokoll("Update-Prüfung nicht möglich: " + ex.Message + (more != null ? " " + more : ""));
                 }
-            }, null, TimeSpan.FromMinutes(5), TimeSpan.FromHours(6));
+            }, null, TimeSpan.FromSeconds(15), TimeSpan.FromHours(6));
+            _installTimer = new System.Threading.Timer(o => DienstAutoUpdate(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
         }
 
         public static void DienstBeenden()
@@ -329,6 +362,74 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
             var t = _timer;
             _timer = null;
             if (t != null) t.Dispose();
+            t = _installTimer;
+            _installTimer = null;
+            if (t != null) t.Dispose();
+        }
+
+        /// <summary>
+        /// Woran das automatische Update im Dienst gerade warten muss (null = nichts los): Verwaltungsfenster offen,
+        /// AD-Abgleich läuft oder in den letzten 5 Minuten hat jemand in der Weboberfläche etwas geändert.
+        /// </summary>
+        private static string Beschaeftigt()
+        {
+            if (AdAbgleich.Laeuft) return "AD-Abgleich läuft";
+            if ((DateTime.UtcNow - WebServer.LetzteAenderung).TotalMinutes < 5) return "Weboberfläche in Benutzung";
+            try
+            {
+                int self = Process.GetCurrentProcess().Id;
+                foreach (var p in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(Application.ExecutablePath)))
+                    using (p) if (p.Id != self) return "Verwaltungsfenster offen";
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>Im Dienst: bekannte neue Version ohne Rückfrage installieren (nur mit "Automatisch prüfen" und "Automatisch aktualisieren").</summary>
+        private static void DienstAutoUpdate()
+        {
+            try
+            {
+                if (Demo.Active || !Auto || !AutoInstall) return;
+                if (!UpdateCheck.IsNewer(Speicher.EinstellungenLesen().updateVersion)) return;
+                if (UpdateCheck.InstallBlocker() != null || Beschaeftigt() != null) return; // nächster Versuch in 5 Minuten
+                if (System.Threading.Interlocked.Exchange(ref _installiert, 1) == 1) return;
+                var info = UpdateCheck.Latest(); // frisch abfragen: Adresse des ZIP
+                if (!UpdateCheck.IsNewer(info.Version) || string.IsNullOrEmpty(info.ZipUrl))
+                {
+                    System.Threading.Interlocked.Exchange(ref _installiert, 0);
+                    return;
+                }
+                Speicher.Protokoll("Automatisches Update auf Version " + info.Version + " wird installiert (der Dienst startet danach neu)");
+                Directory.CreateDirectory(UpdateCheck.Folder);
+                File.WriteAllText(Marker, info.Version);
+                UpdateCheck.Install(info, null, true).Wait(); // das Skript beendet den Dienst, ersetzt die Dateien und startet ihn neu
+            }
+            catch (Exception ex)
+            {
+                System.Threading.Interlocked.Exchange(ref _installiert, 0);
+                try { File.Delete(Marker); } catch { }
+                var inner = ex is AggregateException && ex.InnerException != null ? ex.InnerException : ex;
+                string more = inner.Data["Detail"] as string;
+                Speicher.Protokoll("Automatisches Update nicht möglich: " + inner.Message + (more != null ? " " + more : ""));
+            }
+        }
+
+        /// <summary>Nach einem vom Dienst gestarteten Update: Ergebnis ins Protokoll und in die Ereignisanzeige.</summary>
+        private static void UpdateErgebnisMelden()
+        {
+            try
+            {
+                if (!File.Exists(Marker)) return;
+                File.Delete(Marker);
+                string result = UpdateCheck.LastResult();
+                if (result == null) return;
+                if (result.StartsWith("OK"))
+                    Speicher.Protokoll("Automatisches Update auf Version " + result.Substring(2).Trim() + " installiert");
+                else
+                    Speicher.Protokoll("Automatisches Update fehlgeschlagen: " + result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter");
+            }
+            catch { }
         }
     }
 
@@ -350,6 +451,9 @@ Start-Process -FilePath $Exe -ArgumentList '--nach-update'
         public Func<UpdateStatus> Status;
         public Func<bool> Auto;
         public Action<bool> SetAuto;
+        /// <summary>"Automatisch aktualisieren" (ohne diese beiden fehlt die Zeile im Info-Fenster).</summary>
+        public Func<bool> AutoInstall;
+        public Action<bool> SetAutoInstall;
         public Func<Task<UpdateStatus>> CheckNow;
         public Func<bool> CanInstall;
         public Action Install;

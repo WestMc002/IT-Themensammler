@@ -85,7 +85,7 @@ Web interface and management window in Windows 11 style (light and dark). The us
 - **Per customer** – heading, customer logo (light and dark), e-mail and hotline for urgent problems, whether staff see completed topics, retention period for completed topics (delete, optionally archive as CSV)
 - **Windows service** – starts with Windows, restarts on failure, firewall rule; set up, update and remove in the management window
 - **Monitoring** – `/api/status` for monitoring tools, Windows event log entries, log file and daily backup of the data
-- **Updates** – checks GitHub for a new version at most once a day; "Jetzt aktualisieren" updates program and service
+- **Updates** – checks GitHub for a new version shortly after every start; "Jetzt aktualisieren" updates program and service, optionally automatically when idle
 - **Import** – topics and master data from the previous Excel list
 
 ### Installation
@@ -121,7 +121,7 @@ Weboberfläche und Verwaltungsfenster im Design von Windows 11 (hell und dunkel)
 - **Anpassbar je Kunde** – Überschrift, Kundenlogo (hell und dunkel), E-Mail und Hotline für dringende Probleme, ob Mitarbeiter erledigte Themen sehen, Löschfrist für erledigte Themen (löschen, auf Wunsch vorher als CSV archivieren)
 - **Windows-Dienst** – startet mit Windows, Neustart bei Ausfall, Firewall-Regel; einrichten, aktualisieren und entfernen im Verwaltungsfenster
 - **Überwachung** – `/api/status` für das Überwachungsprogramm, Einträge in der Ereignisanzeige, Protokoll und tägliche Sicherung der Daten
-- **Updates** – sucht höchstens einmal täglich auf GitHub nach einer neuen Version; „Jetzt aktualisieren“ aktualisiert Programm und Dienst
+- **Updates** – sucht kurz nach jedem Start auf GitHub nach einer neuen Version; „Jetzt aktualisieren“ aktualisiert Programm und Dienst, auf Wunsch automatisch, sobald nichts los ist
 - **Übernahme** – Themen und Stammdaten aus der bisherigen Excel-Liste
 
 ### Installation

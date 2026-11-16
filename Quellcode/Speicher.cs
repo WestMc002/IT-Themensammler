@@ -182,6 +182,8 @@ namespace ITThemensammler
         public string adAdminGruppe { get; set; }
         /// <summary>Automatisch auf GitHub nach Updates suchen (Standard: ja).</summary>
         public bool? updateAuto { get; set; }
+        /// <summary>Neue Version ohne Rückfrage installieren, sobald nichts los ist (Standard: nein; nur mit updateAuto).</summary>
+        public bool? updateAutoInstall { get; set; }
         /// <summary>Zeitpunkt der letzten erfolgreichen Update-Prüfung (UTC, ISO 8601).</summary>
         public string updateLetzte { get; set; }
         /// <summary>Neueste Version auf GitHub bei der letzten Prüfung und ihre Release-Seite.</summary>
@@ -207,6 +209,7 @@ namespace ITThemensammler
             if (adLetzter == null) adLetzter = "";
             if (adErgebnis == null) adErgebnis = "";
             if (!updateAuto.HasValue) updateAuto = true;
+            if (!updateAutoInstall.HasValue) updateAutoInstall = false;
             if (adAdminGruppe == null) adAdminGruppe = "";
             if (loeschMonate < 0 || loeschMonate > 120) loeschMonate = 0;
             if (!loeschArchiv.HasValue) loeschArchiv = true;

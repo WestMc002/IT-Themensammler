@@ -68,6 +68,9 @@ namespace ITThemensammler
 
         // Update-Prüfung (globale Vorgabe "Updates", Vorlage: Wake on LAN)
         private readonly Timer _updateTimer = new Timer { Interval = 15000 };
+        private readonly Timer _autoUpdateTimer = new Timer { Interval = 5 * 60000 }; // "Automatisch aktualisieren": neuer Versuch
+        private bool _firstCheck = true;
+        private string _autoError, _autoErrorMore; // Fehler beim automatischen Update (Info-Fenster, bei "Version x verfügbar")
         private readonly Panel _updateHost;   // Hinweisleiste oben, nur bei neuer Version sichtbar
         private readonly UpdateBar _updateBar;
         private UpdateInfo _update;           // neuere Version (null = keine)
@@ -311,6 +314,7 @@ namespace ITThemensammler
             }
             _timer.Stop();
             _updateTimer.Stop();
+            _autoUpdateTimer.Stop();
             TestBeenden();
             base.OnFormClosing(e);
         }
@@ -863,11 +867,29 @@ namespace ITThemensammler
             _updateTimer.Tick += async (s, e) =>
             {
                 _updateTimer.Interval = 6 * 3600000; // danach alle 6 Stunden nachsehen, ob die Prüfung fällig ist
-                // hat der Dienst schon eine neue Version gefunden, gleich prüfen (für den Download-Link)
-                bool gemeldet = UpdateCheck.IsNewer(Speicher.EinstellungenLesen().updateVersion);
-                await CheckForUpdates(false, gemeldet);
+                // beim Start immer prüfen (ohne 20-Stunden-Sperre); hat der Dienst schon eine neue Version gefunden, ebenso
+                bool force = _firstCheck || UpdateCheck.IsNewer(Speicher.EinstellungenLesen().updateVersion);
+                _firstCheck = false;
+                await CheckForUpdates(false, force);
+                TryAutoUpdate();
             };
             _updateTimer.Start();
+            _autoUpdateTimer.Tick += (s, e) => TryAutoUpdate();
+        }
+
+        /// <summary>
+        /// "Automatisch aktualisieren": bekannte neue Version ohne Rückfrage installieren. Läuft der Dienst, übernimmt er das
+        /// (er wartet, bis das Verwaltungsfenster zu ist). Ist ein Dialog offen, alle 5 Minuten ein neuer Versuch.
+        /// </summary>
+        private void TryAutoUpdate()
+        {
+            _autoUpdateTimer.Stop();
+            if (Demo.Active || _installing || _update == null || !UpdatePruefung.Auto || !UpdatePruefung.AutoInstall) return;
+            if (string.IsNullOrEmpty(_update.ZipUrl) || UpdateCheck.InstallBlocker() != null) return;
+            if (DienstSteuerung.Zustand() == DienstZustand.Laeuft) return;
+            // beschäftigt (Info-Fenster, Konto-Dialog o. Ä. offen): später erneut
+            if (Application.OpenForms.Count > 1 || !Visible) { _autoUpdateTimer.Start(); return; }
+            var t = InstallUpdate(true);
         }
 
         private UpdateHooks MakeUpdateHooks()
@@ -879,6 +901,12 @@ namespace ITThemensammler
                 SetAuto = on =>
                 {
                     try { UpdatePruefung.Auto = on; } catch { }
+                },
+                AutoInstall = () => UpdatePruefung.AutoInstall,
+                SetAutoInstall = on =>
+                {
+                    try { UpdatePruefung.AutoInstall = on; } catch { }
+                    if (on) BeginInvoke(new Action(TryAutoUpdate)); // schon bekannte neue Version: gleich (bzw. nach dem Info-Fenster)
                 },
                 CheckNow = () => CheckForUpdates(true, true),
                 CanInstall = () => _update != null && !string.IsNullOrEmpty(_update.ZipUrl) && UpdateCheck.InstallBlocker() == null,
@@ -892,7 +920,8 @@ namespace ITThemensammler
         {
             var letzte = UpdatePruefung.Letzte;
             string last = letzte == DateTime.MinValue ? "" : "Zuletzt geprüft " + letzte.ToLocalTime().ToString("dd.MM.yyyy");
-            if (_update != null) return new UpdateStatus(UpdateKind.Available, "Version " + _update.Version + " verfügbar", last);
+            if (_update != null)
+                return new UpdateStatus(UpdateKind.Available, "Version " + _update.Version + " verfügbar", _autoError ?? last) { More = _autoErrorMore };
             // noch nichts Fertiges veröffentlicht: neutral melden, das ist kein Fehler
             if (_updateError == UpdateCheck.NoRelease) return new UpdateStatus(UpdateKind.Unknown, "Nur Vorabversionen", "Noch keine fertige Version.");
             if (_updateError != null) return new UpdateStatus(UpdateKind.Failed, "Prüfung nicht möglich", _updateError) { More = _updateErrorMore };
@@ -969,7 +998,13 @@ namespace ITThemensammler
             Ui.Open(_update != null && !string.IsNullOrEmpty(_update.Url) ? _update.Url : UpdateCheck.ReleasesPage);
         }
 
-        private async Task InstallUpdate()
+        private Task InstallUpdate()
+        {
+            return InstallUpdate(false);
+        }
+
+        /// <summary>silent: automatisches Update – ohne Rückfrage, Fehler nur im Info-Fenster (Hinweisleiste bleibt).</summary>
+        private async Task InstallUpdate(bool silent)
         {
             if (_update == null || _installing) return;
             var info = _update;
@@ -978,8 +1013,10 @@ namespace ITThemensammler
                 (dienst ? "Dazu werden das Verwaltungsfenster und der Dienst kurz beendet – die Weboberfläche ist für einige Sekunden nicht erreichbar. "
                         : "Dazu wird das Verwaltungsfenster kurz beendet. ") +
                 "Themen, Einstellungen und Konten bleiben erhalten.";
-            if (MessageBox.Show(this, text + "\r\n\r\nJetzt aktualisieren?", Ui.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (!silent && MessageBox.Show(this, text + "\r\n\r\nJetzt aktualisieren?", Ui.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             _installing = true;
+            _autoError = null;
+            _autoErrorMore = null;
             foreach (var b in new[] { _updateBar.Install, _updateBar.Page, _updateBar.Later }) b.Enabled = false;
             string barText = _updateBar.Text;
             try
@@ -991,7 +1028,15 @@ namespace ITThemensammler
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, ex.Message, Ui.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                if (silent)
+                {
+                    // ohne Meldung: Kurzmeldung mit "Details" im Info-Fenster
+                    string more = ex.Data["Detail"] as string;
+                    _autoError = more != null || ex.Message.Length <= 36 ? ex.Message : "";
+                    _autoErrorMore = more ?? (ex.Message.Length > 36 ? ex.Message : null);
+                    Speicher.Protokoll("Automatisches Update nicht möglich: " + ex.Message);
+                }
+                else MessageBox.Show(this, ex.Message, Ui.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 _updateBar.Text = barText;
                 _updateBar.Page.Enabled = true;
                 _updateBar.Later.Enabled = true;

@@ -972,6 +972,8 @@ namespace ITThemensammler
                 Status = () => new UpdateStatus(UpdateKind.Current, "Aktuell", "Zuletzt geprüft " + DateTime.Now.ToString("dd.MM.yyyy")),
                 Auto = () => true,
                 SetAuto = on => { },
+                AutoInstall = () => false,
+                SetAutoInstall = on => { },
                 CheckNow = () => System.Threading.Tasks.Task.FromResult(new UpdateStatus(UpdateKind.Current, "Aktuell", "Zuletzt geprüft " + DateTime.Now.ToString("dd.MM.yyyy"))),
                 CanInstall = () => false
             } : Updates;
@@ -993,7 +995,8 @@ namespace ITThemensammler
             {
                 // Updates-Zeilen im gleichen Raster wie die Zeilen darüber (globale Vorgabe, Referenz: Dock Pilot)
                 int uy = card.Padding.Top + table.Height;
-                card.Height = uy + S(49) + S(32) + card.Padding.Bottom;
+                bool autoInstallRow = updates.AutoInstall != null && updates.SetAutoInstall != null;
+                card.Height = uy + S(49) + S(32) + (autoInstallRow ? S(32) : 0) + card.Padding.Bottom;
                 AddUpdateRows(card, uy, updates);
             }
             Controls.Add(card);
@@ -1197,6 +1200,42 @@ namespace ITThemensammler
             autoText.Click += (s, e) => auto.Checked = !auto.Checked;
             card.Controls.Add(autoText);
 
+            // Automatisch aktualisieren: direkt darunter, nur bedienbar, wenn "Automatisch prüfen" an ist
+            ModernCheck inst = null;
+            Label instText = null;
+            if (updates.AutoInstall != null && updates.SetAutoInstall != null)
+            {
+                int iy = ay + S(32);
+                inst = new ModernCheck("", k) { Checked = updates.AutoInstall(), BackColor = Ui.Card };
+                inst.Bounds = new Rectangle(right - S(46), iy, S(46), S(32));
+                inst.CheckedChanged += (s, e) => updates.SetAutoInstall(inst.Checked);
+                card.Controls.Add(inst);
+                instText = new Label
+                {
+                    Text = "Automatisch aktualisieren",
+                    BackColor = Ui.Card,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    AutoEllipsis = true,
+                    Cursor = Cursors.Hand,
+                    Bounds = new Rectangle(x0, iy, inst.Left - S(8) - x0, S(32))
+                };
+                instText.Click += (s, e) => { if (inst.Enabled) inst.Checked = !inst.Checked; };
+                card.Controls.Add(instText);
+                const string instTip = "Eine neue Version ohne Rückfrage installieren, sobald " + AppInfo.Name + " nicht beschäftigt ist. "
+                    + "Der Dienst wird dabei kurz beendet und startet danach von selbst neu.";
+                tip.SetToolTip(inst, instTip);
+                tip.SetToolTip(instText, instTip);
+                Action dim = () =>
+                {
+                    inst.Enabled = auto.Checked;
+                    instText.ForeColor = auto.Checked ? Ui.Text : Ui.Disabled;
+                    instText.Cursor = auto.Checked ? Cursors.Hand : Cursors.Default;
+                    inst.Invalidate();
+                };
+                auto.CheckedChanged += (s, e) => dim();
+                dim();
+            }
+
             // "Details" auf-/zuklappen: "Automatisch prüfen", die Karte, alles darunter und das Fenster rücken um die Feldhöhe
             bool expanded = false;
             int grown = 0;
@@ -1219,6 +1258,7 @@ namespace ITThemensammler
                 more.Width = TextRenderer.MeasureText(more.Text, more.Font).Width + S(2);
                 auto.Top += d;
                 autoText.Top += d;
+                if (inst != null) { inst.Top += d; instText.Top += d; }
                 card.Height += d;
                 foreach (Control c in Controls)
                     if (c != card && c.Top > card.Top) c.Top += d;

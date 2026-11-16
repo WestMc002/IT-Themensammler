@@ -28,6 +28,8 @@ namespace ITThemensammler
 
         private static Timer _timer;
         private static int _laeuft;
+        /// <summary>true, solange ein Abgleich läuft (das automatische Update wartet dann).</summary>
+        public static bool Laeuft { get { return Thread.VolatileRead(ref _laeuft) == 1; } }
 
         /// <summary>Stündlich prüfen, ob der tägliche Abgleich fällig ist (erster Blick 2 Minuten nach dem Start).</summary>
         public static void Starten()

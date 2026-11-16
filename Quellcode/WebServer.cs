@@ -190,9 +190,15 @@ namespace ITThemensammler
 
         // ------------------------------------------------------------------ Verteilung
 
+        /// <summary>Zeitpunkt (UTC-Ticks) der letzten ändernden Anfrage: Solange jemand arbeitet, wartet das automatische Update.</summary>
+        private static long _letzteAenderung;
+        public static DateTime LetzteAenderung { get { return new DateTime(Interlocked.Read(ref _letzteAenderung), DateTimeKind.Utc); } }
+
         private void Bearbeiten(HttpListenerContext ctx)
         {
             string pfad = ctx.Request.Url.AbsolutePath;
+            string methode = ctx.Request.HttpMethod;
+            if (methode != "GET" && methode != "HEAD") Interlocked.Exchange(ref _letzteAenderung, DateTime.UtcNow.Ticks);
             try
             {
                 // Proxy-Port: nur Anfragen vom Connector (dessen Kopfzeilen tragen die Microsoft-365-Anmeldung)
