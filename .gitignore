@@ -9,7 +9,7 @@ Backup/
 Bin/
 Design/
 
-# Laufzeitdaten (liegen ohnehin unter %ProgramData%\reitzner IT-Themensammler)
+# Laufzeitdaten (liegen ohnehin unter %ProgramData%\IT-Themensammler)
 daten.json
 einstellungen.json
 Protokoll.log

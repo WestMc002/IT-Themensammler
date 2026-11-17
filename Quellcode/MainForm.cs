@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Verwaltungsfenster: Dienst, Webserver, Admin-Konten und Daten
+// IT-Themensammler – Verwaltungsfenster: Dienst, Webserver, Admin-Konten und Daten
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -96,9 +96,10 @@ namespace ITThemensammler
             var header = new HeaderPanel(Ui.AppName, "Themen der Mitarbeiter für den nächsten Vor-Ort-Termin sammeln", k);
             var footer = new SignatureFooter(k);
 
-            // Meldungszeile über dem Footer
+            // Meldungszeile über dem Footer: nur sichtbar, wenn sie etwas meldet (sonst ist der Abstand Karte → Fußzeile zu groß)
             _message = new Label
             {
+                Visible = false,
                 Dock = DockStyle.Bottom,
                 Height = S(28),
                 AutoEllipsis = true,
@@ -388,7 +389,8 @@ namespace ITThemensammler
             // Daten
             _cardData.SetBounds(x + scroll.X, y + scroll.Y, w, _cardData.Height);
             _dataInfo.SetBounds(S(20), S(46), w - S(40), S(52));
-            y += _cardData.Height + S(28);
+            // die letzte Karte endet unten bündig mit dem Bildlaufbereich: Abstand zur Fußzeile wie beim RDP Pilot
+            y += _cardData.Height;
 
             // Platz unten zum Rollen
             _body.AutoScrollMinSize = new Size(0, y);
@@ -853,7 +855,7 @@ namespace ITThemensammler
                 if (result != null && result.StartsWith("OK"))
                 {
                     string v = result.Substring(2).Trim();
-                    _message.Text = "Update auf Version " + v + " installiert.";
+                    Meldung("Update auf Version " + v + " installiert.", false);
                     _message.ForeColor = Ui.Green;
                     Speicher.Protokoll("Update auf Version " + v + " installiert");
                 }
@@ -1049,6 +1051,7 @@ namespace ITThemensammler
         {
             _message.Text = text;
             _message.ForeColor = fehler ? Ui.Red : Ui.Muted;
+            _message.Visible = !string.IsNullOrEmpty(text);
         }
     }
 

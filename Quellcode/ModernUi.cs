@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Bausteine der Oberfläche im Windows-11-Stil (Kopf, Karten, Knöpfe, Eingabefelder, Footer, Info-Fenster)
+// IT-Themensammler – Bausteine der Oberfläche im Windows-11-Stil (Kopf, Karten, Knöpfe, Eingabefelder, Footer, Info-Fenster)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -828,78 +828,114 @@ namespace ITThemensammler
         }
     }
     /// <summary>
-    /// Fußzeile unten im Fenster (reitzner-Projekt, Globale Richtlinien): flache Zeile in Fensterfarbe,
-    /// links "© Jahr · Programmname", rechts nur das reitzner-Logo (ohne Name und Website des Entwicklers).
+    /// Fußzeile unten im Fenster (wie RDP Pilot ab 1.50): links grau "© Jahr · Programmname", rechts klein und grau
+    /// "www.westmc002.de" in derselben Schrift; beim Überfahren Akzentfarbe und Handzeiger, ein Klick öffnet die Website.
+    /// Kein GS-Logo und kein Name (Abweichung von den Globalen Richtlinien; das GS-Logo steht groß im Info-Fenster).
+    /// Waagrecht auf Höhe der Karten darüber (Seitenrand 28, rechts zusätzlich die Breite der Bildlaufleiste).
+    /// Senkrecht: 10 Abstand zur Meldungszeile darüber, Textzeile 38 hoch (Text mittig), 11 Rand unten – die Schrift
+    /// sitzt in ihrer Zeile ca. 1 tiefer, so ist der Abstand Element darüber → Schrift gleich Schrift → Fensterrand.
     /// </summary>
     internal sealed class SignatureFooter : Panel
     {
+        public const string Url = "https://www.westmc002.de";
+        private const string Website = "www.westmc002.de";
+        private static Image _logo;
+        private static bool _logoLoaded;
         private readonly float k;
+        private Rectangle _link;
+        private bool _hover;
 
         public SignatureFooter(float scale)
         {
             k = scale;
             Dock = DockStyle.Bottom;
-            Height = (int)(64 * k);
+            Height = (int)(10 * k) + (int)(38 * k) + (int)(11 * k);
             BackColor = Ui.Back;
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         }
 
-        private static Image _light, _dark;
-        private static bool _loaded;
+        private static Font _font;
 
-        /// <summary>reitzner-Logo passend zum hellen bzw. dunklen Design (Resources\Logo-*.png neben der EXE, sonst eingebettet).</summary>
-        public static Image Logo(bool dark)
+        /// <summary>Schrift wie im RDP Pilot: "Segoe UI Variable Small" 9 pt (Windows 11), sonst "Segoe UI" 9 pt.</summary>
+        private static Font FooterFont
         {
-            if (!_loaded)
+            get
             {
-                _loaded = true;
-                _light = Load("Logo-hell.png");
-                _dark = Load("Logo-dunkel.png");
+                if (_font != null) return _font;
+                foreach (string name in new[] { "Segoe UI Variable Small", "Segoe UI Variable Text", "Segoe UI" })
+                {
+                    var f = new Font(name, 9f);
+                    if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase)) { _font = f; return f; }
+                    f.Dispose();
+                }
+                _font = new Font("Segoe UI", 9f);
+                return _font;
             }
-            return dark ? (_dark ?? _light) : (_light ?? _dark);
         }
 
-        private static Image Load(string name)
+        /// <summary>GS-Logo (Info-Fenster): Resources\GS-Logo.png neben der EXE, sonst das von Erstellen.bat eingebettete Logo.</summary>
+        public static Image GsLogo
         {
-            try
+            get
             {
-                string p = Path.Combine(Path.Combine(Application.StartupPath, "Resources"), name);
-                if (File.Exists(p))
-                    using (var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    using (var img = Image.FromStream(fs))
-                        return new Bitmap(img);
-                using (var rs = typeof(Ui).Assembly.GetManifestResourceStream(name))
-                    if (rs != null) using (var img = Image.FromStream(rs)) return new Bitmap(img);
+                if (_logoLoaded) return _logo;
+                _logoLoaded = true;
+                try
+                {
+                    string p = Path.Combine(Path.Combine(Application.StartupPath, "Resources"), "GS-Logo.png");
+                    if (File.Exists(p))
+                        using (var fs = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                        using (var img = Image.FromStream(fs))
+                            _logo = new Bitmap(img);
+                    else
+                        using (var rs = typeof(Ui).Assembly.GetManifestResourceStream("GS-Logo.png"))
+                            if (rs != null) using (var img = Image.FromStream(rs)) _logo = new Bitmap(img);
+                }
+                catch { _logo = null; }
+                return _logo;
             }
-            catch { }
-            return null;
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
             g.Clear(BackColor);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            int left = (int)(28 * k);
+            int right = Width - (int)(28 * k) - SystemInformation.VerticalScrollBarWidth; // rechte Kante der Karten
+            var f = FooterFont;
+            int oben = (int)(10 * k), zeile = (int)(38 * k); // 10 Abstand, Textzeile 38, darunter 11 Rand
+            var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+            var size = TextRenderer.MeasureText(g, Website, f, Size.Empty, flags);
+            // links und rechts gleich weit von der Kante: das "©" bringt links etwa 1 × Skalierung Rand mit,
+            // deshalb rechts um 1 × Skalierung einrücken
+            _link = new Rectangle(right - (int)Math.Round(k) - size.Width, oben + (zeile - size.Height) / 2, size.Width, size.Height);
+            TextRenderer.DrawText(g, Website, f, _link.Location, _hover ? Ui.AccentText : Ui.Muted, flags);
+            string text = "© " + DateTime.Now.Year + " · " + Ui.AppName;
+            TextRenderer.DrawText(g, text, f, new Rectangle(left, oben, Math.Max(0, _link.X - (int)(18 * k) - left), zeile), Ui.Muted,
+                flags | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        }
 
-            int pad = (int)(28 * k);
-            int right = Width - pad;
-            var logo = Logo(Theme.Dark);
-            if (logo != null)
-            {
-                int lh = (int)(30 * k);
-                int lw = logo.Width * lh / Math.Max(1, logo.Height);
-                g.DrawImage(logo, new Rectangle(right - lw, (Height - lh) / 2, lw, lh));
-                right -= lw + (int)(16 * k);
-            }
-            var flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
-            using (var f = new Font("Segoe UI", 9f))
-                TextRenderer.DrawText(g, "© " + DateTime.Now.Year + " · " + Ui.AppName, f, new Rectangle(pad, 0, Math.Max(0, right - pad), Height), Ui.Muted, flags);
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool h = _link.Contains(e.Location);
+            if (h != _hover) { _hover = h; Cursor = h ? Cursors.Hand : Cursors.Default; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            if (_hover) { _hover = false; Cursor = Cursors.Default; Invalidate(); }
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && _link.Contains(e.Location)) Ui.Open(Url);
+            base.OnMouseClick(e);
         }
     }
 
-    /// <summary>"Info über reitzner IT-Themensammler": großes reitzner-Logo, Version, Eckdaten (Vorlage: Monitor Dimmer, reitzner RDP Pilot).</summary>
+    /// <summary>"Info über IT-Themensammler": großes GS-Logo, Version, Eckdaten (Vorlage: Monitor Dimmer).</summary>
     internal sealed class AboutDialog : FixedForm
     {
         private static AboutDialog _open;
@@ -933,10 +969,10 @@ namespace ITThemensammler
             int y = S(24);
             var logo = new PictureBox
             {
-                Image = SignatureFooter.Logo(Theme.Dark),
+                Image = SignatureFooter.GsLogo,
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Location = new Point(S(64), y),
-                Size = new Size(W - S(128), S(130)),
+                Location = new Point(0, y),
+                Size = new Size(W, S(130)),
                 BackColor = Color.Transparent
             };
             if (logo.Image == null) logo.Image = Ui.AppIcon(128);

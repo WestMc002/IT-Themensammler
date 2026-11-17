@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Datenhaltung: Themen, Stammdaten, Einstellungen und Admin-Konten (JSON im Datenordner)
+// IT-Themensammler – Datenhaltung: Themen, Stammdaten, Einstellungen und Admin-Konten (JSON im Datenordner)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -228,7 +228,7 @@ namespace ITThemensammler
     }
 
     /// <summary>
-    /// Zugriff auf die Dateien im Datenordner (%ProgramData%\reitzner IT-Themensammler). Dienst und Verwaltungsfenster
+    /// Zugriff auf die Dateien im Datenordner (%ProgramData%\IT-Themensammler). Dienst und Verwaltungsfenster
     /// arbeiten mit denselben Dateien; vor jedem Zugriff wird geprüft, ob die Datei inzwischen geändert wurde.
     /// </summary>
     internal static class Speicher
@@ -245,7 +245,7 @@ namespace ITThemensammler
         /// <summary>Nur für die Screenshots: eigener Datenordner mit Beispieldaten (sonst null).</summary>
         public static string DemoOrdner;
 
-        /// <summary>Datenordner: %ProgramData%\reitzner IT-Themensammler (bei den Screenshots ein Ordner mit Beispieldaten).</summary>
+        /// <summary>Datenordner: %ProgramData%\IT-Themensammler (bei den Screenshots ein Ordner mit Beispieldaten).</summary>
         public static string Ordner
         {
             get { return DemoOrdner ?? StandardOrdner; }

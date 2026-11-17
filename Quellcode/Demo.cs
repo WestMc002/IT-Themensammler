@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Screenshots mit Beispieldaten (hell und dunkel) für GitHub
+// IT-Themensammler – Screenshots mit Beispieldaten (hell und dunkel) für GitHub
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,7 +21,7 @@ namespace ITThemensammler
 {
     /// <summary>
     /// Erzeugt die Screenshots für die README aus Beispieldaten (Resources\Demo.json, in die EXE eingebettet).
-    /// Aufruf: "reitzner IT-Themensammler.exe" --screenshots [Zielordner].
+    /// Aufruf: "IT-Themensammler.exe" --screenshots [Zielordner].
     /// Die echten Daten unter %ProgramData% und der eingerichtete Dienst werden dabei nicht angefasst: Die Beispieldaten
     /// liegen in einem eigenen temporären Ordner, der Webserver läuft nur für die Aufnahmen auf einem freien Port.
     ///

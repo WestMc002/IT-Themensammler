@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Update-Prüfung über die GitHub-Releases und Selbst-Update (auch des Dienstes)
+// IT-Themensammler – Update-Prüfung über die GitHub-Releases und Selbst-Update (auch des Dienstes)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -35,17 +35,17 @@ namespace ITThemensammler
     /// </summary>
     internal static class UpdateCheck
     {
-        public const string Repo = "WestMc002/reitzner-IT-Themensammler";
+        public const string Repo = "WestMc002/IT-Themensammler";
         public const string ReleasesPage = "https://github.com/" + Repo + "/releases";
         private const string Api = "https://api.github.com/repos/" + Repo + "/releases/latest";
         /// <summary>Kein Fehler: Es gibt noch keine fertige Version (Vorabversionen zählen bei "latest" nicht).</summary>
         public const string NoRelease = "Auf GitHub ist noch keine fertige Version veröffentlicht.";
 
         /// <summary>Arbeitsordner für Download und Hilfsskript.</summary>
-        public static string Folder { get { return Path.Combine(Path.GetTempPath(), "reitzner-IT-Themensammler-Update"); } }
+        public static string Folder { get { return Path.Combine(Path.GetTempPath(), "IT-Themensammler-Update"); } }
         public static string LogFile { get { return Path.Combine(Folder, "Update.log"); } }
 
-        private static string UserAgent { get { return "reitzner-IT-Themensammler/" + AppInfo.Version; } } // GitHub verlangt einen User-Agent
+        private static string UserAgent { get { return "IT-Themensammler/" + AppInfo.Version; } } // GitHub verlangt einen User-Agent
 
         private static void PrepareTls()
         {
@@ -163,7 +163,7 @@ namespace ITThemensammler
             if (blocker != null) throw new Exception(blocker);
             PrepareTls();
             Directory.CreateDirectory(Folder);
-            string zip = Path.Combine(Folder, "reitzner-IT-Themensammler-" + release.Version + ".zip");
+            string zip = Path.Combine(Folder, "IT-Themensammler-" + release.Version + ".zip");
             using (var client = new WebClient())
             {
                 client.Headers[HttpRequestHeader.UserAgent] = UserAgent;
@@ -175,8 +175,10 @@ namespace ITThemensammler
             File.WriteAllText(script, Script, new UTF8Encoding(true));
             try { File.Delete(LogFile); } catch { }
             // Eingerichteter Dienst: dessen Programmdatei ersetzen (Dienst wird dafür kurz beendet), sonst die laufende EXE
-            bool dienst = DienstSteuerung.Zustand() != DienstZustand.NichtEingerichtet && File.Exists(DienstSteuerung.ProgrammPfad);
-            string exe = dienst ? DienstSteuerung.ProgrammPfad : Application.ExecutablePath;
+            // Programmdatei des Dienstes (nach einem Update aus der Zeit vor der Umbenennung kurz noch im alten Programmordner)
+            string dienstExe = DienstSteuerung.DienstPfad() ?? DienstSteuerung.ProgrammPfad;
+            bool dienst = DienstSteuerung.Zustand() != DienstZustand.NichtEingerichtet && File.Exists(dienstExe);
+            string exe = dienst ? dienstExe : Application.ExecutablePath;
             string target = Path.GetDirectoryName(exe);
             var start = new ProcessStartInfo("powershell.exe",
                 "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\" -ProcessId " + (ausDienst ? 0 : Process.GetCurrentProcess().Id) +
@@ -200,7 +202,7 @@ namespace ITThemensammler
             catch { return null; }
         }
 
-        private const string Script = @"# reitzner IT-Themensammler – Update (wird vom Programm erzeugt)
+        private const string Script = @"# IT-Themensammler – Update (wird vom Programm erzeugt)
 param([int]$ProcessId,[string]$Zip,[string]$Exe,[string]$Version,[string]$Service,[switch]$NoStart)
 $ErrorActionPreference = 'Stop'
 $log = Join-Path $PSScriptRoot 'Update.log'

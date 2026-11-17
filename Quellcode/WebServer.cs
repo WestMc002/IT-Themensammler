@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – eingebauter Webserver: Weboberfläche, Schnittstelle und Admin-Anmeldung
+// IT-Themensammler – eingebauter Webserver: Weboberfläche, Schnittstelle und Admin-Anmeldung
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -246,11 +246,11 @@ namespace ITThemensammler
                 case "/favicon.ico":
                     Senden(ctx, 200, Eingebettet("ITThemensammler.ico"), "image/x-icon", true);
                     return;
-                case "/logo/reitzner-hell.png":
-                    Senden(ctx, 200, Eingebettet("Logo-hell.png"), "image/png", true);
+                case "/logo/programm.png":
+                    Senden(ctx, 200, ProgrammBild(), "image/png", true);
                     return;
-                case "/logo/reitzner-dunkel.png":
-                    Senden(ctx, 200, Eingebettet("Logo-dunkel.png"), "image/png", true);
+                case "/logo/gs-logo.png":
+                    Senden(ctx, 200, Eingebettet("GS-Logo.png"), "image/png", true);
                     return;
                 case "/logo/kunde-hell.png":
                 case "/logo/kunde-dunkel.png":
@@ -262,6 +262,23 @@ namespace ITThemensammler
                     return;
             }
             throw new WebFehler(404, "Nicht gefunden.");
+        }
+
+        private static byte[] _programmBild;
+
+        /// <summary>Programm-Icon als PNG (128 px) für Kopf und Tagesbericht der Weboberfläche.</summary>
+        private byte[] ProgrammBild()
+        {
+            if (_programmBild != null) return _programmBild;
+            using (var ms = new MemoryStream(Eingebettet("ITThemensammler.ico")))
+            using (var ico = new System.Drawing.Icon(ms, 128, 128))
+            using (var bmp = ico.ToBitmap())
+            using (var png = new MemoryStream())
+            {
+                bmp.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                _programmBild = png.ToArray();
+            }
+            return _programmBild;
         }
 
         private byte[] Eingebettet(string name)

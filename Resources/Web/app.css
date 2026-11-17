@@ -1,6 +1,6 @@
 /*
- * reitzner IT-Themensammler - Weboberfläche
- * Akzentfarbe: reitzner-Grün (Globale Richtlinien, reitzner-Web-Apps), übrige Farben Windows-11-Standardwerte.
+ * IT-Themensammler - Weboberfläche
+ * Akzentfarbe: Grün, übrige Farben Windows-11-Standardwerte.
  * Hell/Dunkel folgt der Windows-Einstellung (prefers-color-scheme).
  */
 
@@ -83,16 +83,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .kopf-innen { position: relative; max-width: 1320px; margin: 0 auto; padding: 0 24px; height: 72px;
   display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .marke { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.marke-logo img { height: 34px; display: block; }
+.marke-icon { width: 40px; height: 40px; display: block; flex: none; }
 .marke-text { padding-left: 14px; border-left: 2px solid var(--lime); min-width: 0; }
 .marke-text span { display: block; font-size: 20px; font-weight: 600; line-height: 1.15; white-space: nowrap; }
 .marke-text small { display: block; font-size: 12.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kunde { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.kunde { display: flex; align-items: center; gap: 12px; max-width: 42%; }
-.kunde img { display: block; max-height: 52px; max-width: 200px; }
-.kunde-name { font-weight: 600; font-size: 15px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kunde-name:empty { display: none; }
-.kunde.nur-name .kunde-name { font-size: 17px; color: var(--text); }
+.marke-icon[hidden], .marke-kunde[hidden] { display: none; }
+.marke-kunde { flex: none; }
+.marke-kunde img { display: block; max-height: 48px; max-width: 200px; }
 .reiter { display: flex; align-self: stretch; align-items: stretch; gap: 4px; }
 .reiter button { border: 0; border-bottom: 3px solid transparent; background: none; padding: 0 14px;
   cursor: pointer; font-weight: 600; font-size: 15px; color: var(--text-2); }
@@ -234,7 +231,7 @@ thead th.haken { text-align: center; }
 .bericht-kopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid var(--lime); padding-bottom: 12px; }
 .bericht-kopf h2 { margin: 0 0 2px; }
 .bericht-unter { color: var(--text-2); }
-.bericht-logo img { height: 36px; display: block; }
+.bericht-icon { width: 40px; height: 40px; display: block; flex: none; }
 .bericht-zahlen { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 .bericht-zahlen div { background: var(--flaeche); border-radius: var(--radius); padding: 10px 16px; min-width: 150px; }
 .bericht-zahlen strong { display: block; font-size: 22px; line-height: 1.2; }
@@ -249,7 +246,6 @@ thead th.haken { text-align: center; }
   color: var(--text-2); font-size: 12px; }
 .fuss-version { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
 .fuss-version:hover { color: var(--akzent); }
-.fuss-logo img { height: 28px; display: block; }
 
 /* ---------- Dialoge ---------- */
 .dialog, .info { border: 1px solid var(--karte-rand); border-radius: var(--radius); background: var(--hg); color: var(--text);
@@ -261,7 +257,7 @@ thead th.haken { text-align: center; }
 .links-aussen { margin-right: auto; }
 .info { width: 440px; max-width: calc(100% - 32px); padding: 0; }
 .info-logo { display: flex; justify-content: center; padding: 26px 40px 8px; }
-.info-logo img { width: 100%; max-width: 300px; display: block; }
+.info-logo img { width: 100%; max-width: 260px; display: block; }
 .info-name { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 4px; }
 .info-name strong { font-size: 18px; font-weight: 600; }
 .info-name span { color: var(--akzent); font-size: 13px; }
@@ -274,17 +270,14 @@ thead th.haken { text-align: center; }
 
 /* ---------- Schmal ---------- */
 @media (max-width: 1100px) {
-  .kunde { position: static; transform: none; }
-  .kunde img { max-height: 40px; max-width: 120px; }
-  .kunde { max-width: none; }
-  .kunde:not(.nur-name) .kunde-name { display: none; }
+  .marke-kunde img { max-height: 40px; max-width: 140px; }
   .raster { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 800px) {
   .kopf-innen { padding: 8px 14px 0; height: auto; gap: 4px 10px; flex-wrap: wrap; }
   .marke { flex: 1 1 auto; }
   .reiter { flex: 1 0 100%; height: 42px; overflow-x: auto; }
-  .marke-logo { display: none; }
+  .marke-icon { display: none; }
   .marke-text { padding-left: 0; border-left: 0; }
   .marke-text span { font-size: 17px; }
   .marke-text small { display: none; }
@@ -306,7 +299,7 @@ thead th.haken { text-align: center; }
   .fuss { padding: 8px 14px 14px; }
 }
 @media (max-width: 520px) {
-  .kunde { display: none; }
+  .marke-kunde img { max-height: 30px; max-width: 110px; }
 }
 
 /* ---------- Drucken: nur die Liste ---------- */
@@ -322,7 +315,6 @@ thead th.haken { text-align: center; }
   body.druck-bericht .seite { padding: 0; max-width: none; }
   .bericht { border: 0; box-shadow: none; padding: 0; }
   .bericht-zahlen div { border: 1px solid #ccc; }
-  .bericht-logo source { display: none; }
 }
 /* Schalter in der Verwaltung */
 .schalter { display: flex; align-items: center; gap: 10px; margin: 6px 0 2px; cursor: pointer; }

@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Programmstart: Verwaltungsfenster bzw. Windows-Dienst
+// IT-Themensammler – Programmstart: Verwaltungsfenster bzw. Windows-Dienst
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,9 +21,9 @@ namespace ITThemensammler
 {
     public static partial class AppInfo
     {
-        public const string Name = "reitzner IT-Themensammler";
-        /// <summary>Angabe "Entwickler" im Info-Fenster und in der Weboberfläche (reitzner-Projekt: ohne Name und Website des Entwicklers).</summary>
-        public const string Company = "reitzner AG";
+        public const string Name = "IT-Themensammler";
+        /// <summary>Angabe "Entwickler" im Info-Fenster und in der Weboberfläche.</summary>
+        public const string Company = "Günther Schoder";
     }
 
     internal static class Program
@@ -37,6 +37,7 @@ namespace ITThemensammler
             if (args.Length > 0 && string.Equals(args[0], Dienst.Argument, StringComparison.OrdinalIgnoreCase))
             {
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Speicher.Fehler("Unerwarteter Fehler im Dienst", e.ExceptionObject as Exception);
+                Umzug.Daten(); // früherer Programmname: Daten in den neuen Ordner (vor dem ersten Zugriff)
                 ServiceBase.Run(new Dienst());
                 return 0;
             }
@@ -69,6 +70,9 @@ namespace ITThemensammler
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (s, e) => ShowCrash(e.Exception);
             AppDomain.CurrentDomain.UnhandledException += (s, e) => ShowCrash(e.ExceptionObject as Exception);
+
+            // früherer Name: Daten übernehmen, außer ein Dienst der alten Version läuft noch (dann beim "Dienst aktualisieren")
+            if (!Umzug.AlterDienstLaeuft()) Umzug.Daten();
 
             try
             {

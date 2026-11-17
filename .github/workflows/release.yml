@@ -1,6 +1,6 @@
 name: Release
 
-# Release v<Version> mit "reitzner-IT-Themensammler-<Version>.zip" ("reitzner IT-Themensammler.exe" + Liesmich.txt).
+# Release v<Version> mit "IT-Themensammler-<Version>.zip" ("IT-Themensammler.exe" + Liesmich.txt).
 # Die Update-Prüfung im Programm sucht genau diese ZIP-Datei im neuesten Release.
 # Release-Seite: oben "Änderungen" (Punkte aus dem Commit-Text zur Version), darunter die Installation.
 # - Run workflow (Versionsnummer) oder Tag v<Version>: Release anlegen; gibt es es schon,
@@ -68,12 +68,12 @@ jobs:
               '',
               '## Installation',
               '',
-              "1. ``reitzner-IT-Themensammler-$ver.zip`` herunterladen und in einen eigenen Ordner auf dem Server entpacken.",
-              '2. `reitzner IT-Themensammler.exe` starten (fragt nach Administratorrechten) und unter „Admin-Konten“ mindestens ein Konto anlegen.',
+              "1. ``IT-Themensammler-$ver.zip`` herunterladen und in einen eigenen Ordner auf dem Server entpacken.",
+              '2. `IT-Themensammler.exe` starten (fragt nach Administratorrechten) und unter „Admin-Konten“ mindestens ein Konto anlegen.',
               '3. Bei Bedarf den Port ändern (Standard 8080), unter „Aussehen“ in der Weboberfläche E-Mail und Hotline für dringende Probleme eintragen.',
-              '4. „Dienst einrichten“ wählen: Das Programm wird nach `C:\Program Files\reitzner IT-Themensammler` kopiert und läuft als Windows-Dienst. Die angezeigte Adresse (z. B. `http://server:8080/`) an die Mitarbeiter geben.',
+              '4. „Dienst einrichten“ wählen: Das Programm wird nach `C:\Program Files\IT-Themensammler` kopiert und läuft als Windows-Dienst. Die angezeigte Adresse (z. B. `http://server:8080/`) an die Mitarbeiter geben.',
               '',
-              'Neue Version: Das Verwaltungsfenster zeigt sie oben an; „Jetzt aktualisieren“ tauscht Programm und Dienst aus. Alternativ die neue EXE starten und „Dienst aktualisieren“ wählen.',
+              'Neue Version: Das Verwaltungsfenster zeigt sie oben an; „Jetzt aktualisieren“ tauscht Programm und Dienst aus. Alternativ die neue EXE starten und „Dienst aktualisieren“ wählen. Installationen bis 1.22 (früherer Programmname) ziehen dabei selbst auf den neuen Namen um.',
               '',
               'Voraussetzung: Windows 10/11 oder Windows Server mit .NET Framework 4.x. Ausführliche Beschreibung (Domänen-Anmeldung, Active Directory, Microsoft 365) und Versionsgeschichte: `Liesmich.txt` im ZIP.'
             )
@@ -94,9 +94,9 @@ jobs:
           ) | Set-Content -Path 'Quellcode\VersionInfo.cs' -Encoding UTF8
           $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
           if (-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:reitzner IT-Themensammler.exe" `
+          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:IT-Themensammler.exe" `
             "/win32icon:Resources\ITThemensammler.ico" "/resource:Resources\ITThemensammler.ico,ITThemensammler.ico" `
-            "/resource:Resources\Logo-hell.png,Logo-hell.png" "/resource:Resources\Logo-dunkel.png,Logo-dunkel.png" `
+            "/resource:Resources\GS-Logo.png,GS-Logo.png" `
             /win32manifest:Quellcode\app.manifest `
             "/resource:Resources\Web\index.html,Web.index.html" "/resource:Resources\Web\app.css,Web.app.css" "/resource:Resources\Web\app.js,Web.app.js" `
             "/resource:Resources\Demo.json,Demo.json" `
@@ -111,11 +111,15 @@ jobs:
         shell: pwsh
         run: |
           # GitHub ersetzt Leerzeichen in Dateinamen von Release-Anhängen durch Punkte -
-          # im ZIP bleibt der Originalname "reitzner IT-Themensammler.exe" erhalten
+          # im ZIP bleibt der Originalname "IT-Themensammler.exe" erhalten
           $ver = '${{ steps.ver.outputs.new }}'
           New-Item -ItemType Directory -Path 'paket' | Out-Null
-          Copy-Item 'reitzner IT-Themensammler.exe', 'Liesmich.txt' -Destination 'paket'
-          Compress-Archive -Path 'paket\*' -DestinationPath "reitzner-IT-Themensammler-$ver.zip"
+          Copy-Item 'IT-Themensammler.exe', 'Liesmich.txt' -Destination 'paket'
+          # Update älterer Versionen (bis 1.22): deren Update-Skript sucht im ZIP die EXE unter dem früheren Dateinamen;
+          # die neue Version zieht danach selbst auf den neuen Namen um (Quellcode\Umzug.cs)
+          New-Item -ItemType Directory -Path 'paket\Update-von-1.22' | Out-Null
+          Copy-Item 'IT-Themensammler.exe' -Destination ('paket\Update-von-1.22\' + 'reitzner IT-Themensammler.exe')
+          Compress-Archive -Path 'paket\*' -DestinationPath "IT-Themensammler-$ver.zip"
 
       - name: Release anlegen
         if: steps.ver.outputs.new != ''
@@ -124,7 +128,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ver = '${{ steps.ver.outputs.new }}'
-          gh release create "v$ver" "reitzner-IT-Themensammler-$ver.zip" --repo "${{ github.repository }}" --title "reitzner IT-Themensammler $ver" --notes-file "notes\$ver.md"
+          gh release create "v$ver" "IT-Themensammler-$ver.zip" --repo "${{ github.repository }}" --title "IT-Themensammler $ver" --notes-file "notes\$ver.md"
 
       - name: Release-Texte auffrischen
         if: steps.ver.outputs.refresh != ''

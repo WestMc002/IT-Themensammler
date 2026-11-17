@@ -12,18 +12,12 @@
 <header class="kopf">
   <div class="kopf-innen">
     <div class="marke">
-      <picture class="marke-logo">
-        <source srcset="/logo/reitzner-dunkel.png" media="(prefers-color-scheme: dark)">
-        <img src="/logo/reitzner-hell.png" alt="reitzner">
-      </picture>
-      <div class="marke-text"><span id="titel">IT-Themensammlung</span><small id="untertitel"></small></div>
-    </div>
-    <div class="kunde" id="kunde" hidden>
-      <picture id="kunde-bild" hidden>
+      <img class="marke-icon" id="marke-icon" src="/logo/programm.png" alt="">
+      <picture class="marke-kunde" id="kunde-bild" hidden>
         <source id="kunde-dunkel" media="(prefers-color-scheme: dark)">
         <img id="kunde-hell" alt="">
       </picture>
-      <span id="kunde-name" class="kunde-name"></span>
+      <div class="marke-text"><span id="titel">IT-Themensammlung</span><small id="untertitel"></small></div>
     </div>
     <nav class="reiter">
       <button type="button" id="reiter-themen" class="aktiv">Themen</button>
@@ -111,10 +105,7 @@
           <h2 id="b-titel">Tagesbericht</h2>
           <div id="b-unter" class="bericht-unter"></div>
         </div>
-        <picture class="bericht-logo">
-          <source srcset="/logo/reitzner-dunkel.png" media="(prefers-color-scheme: dark)">
-          <img src="/logo/reitzner-hell.png" alt="reitzner">
-        </picture>
+        <img class="bericht-icon" src="/logo/programm.png" alt="">
       </header>
       <div id="b-zahlen" class="bericht-zahlen"></div>
 
@@ -337,11 +328,7 @@
 </main>
 
 <footer class="fuss">
-  <div class="fuss-links">© <span id="jahr"></span> · <span class="prog-name">reitzner IT-Themensammler</span> · <button type="button" class="fuss-version" id="version-knopf"></button></div>
-  <picture class="fuss-logo">
-    <source srcset="/logo/reitzner-dunkel.png" media="(prefers-color-scheme: dark)">
-    <img src="/logo/reitzner-hell.png" alt="reitzner">
-  </picture>
+  <div class="fuss-links">© <span id="jahr"></span> · <span class="prog-name">IT-Themensammler</span> · <button type="button" class="fuss-version" id="version-knopf"></button></div>
 </footer>
 
 <!-- ===================== Dialoge ===================== -->
@@ -504,12 +491,9 @@
 
 <dialog id="info" class="info">
   <div class="info-logo">
-    <picture>
-      <source srcset="/logo/reitzner-dunkel.png" media="(prefers-color-scheme: dark)">
-      <img src="/logo/reitzner-hell.png" alt="reitzner">
-    </picture>
+    <img src="/logo/gs-logo.png" alt="Günther Schoder">
   </div>
-  <div class="info-name"><strong class="prog-name">reitzner IT-Themensammler</strong><span id="info-version"></span></div>
+  <div class="info-name"><strong class="prog-name">IT-Themensammler</strong><span id="info-version"></span></div>
   <p>Mitarbeiter tragen hier IT-Themen ein, die beim nächsten Vor-Ort-Termin erledigt werden.</p>
   <dl class="info-daten">
     <dt>Entwickler</dt><dd id="info-firma"></dd>
@@ -517,7 +501,7 @@
     <dt>Technik</dt><dd>Windows-Dienst mit eingebautem Webserver</dd>
   </dl>
   <div class="info-fuss">
-    <span>© <span id="info-jahr"></span> · <span class="prog-name">reitzner IT-Themensammler</span></span>
+    <span>© <span id="info-jahr"></span> · <span class="prog-name">IT-Themensammler</span></span>
     <button type="button" class="knopf" data-schliessen>Schließen</button>
   </div>
 </dialog>

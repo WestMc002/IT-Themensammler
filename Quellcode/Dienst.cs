@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Windows-Dienst sowie Einrichten, Starten, Beenden und Entfernen des Dienstes
+// IT-Themensammler – Windows-Dienst sowie Einrichten, Starten, Beenden und Entfernen des Dienstes
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -35,6 +35,7 @@ namespace ITThemensammler
         {
             try
             {
+                Umzug.Programm(); // früherer Name: aus dem alten Programmordner umziehen (startet dann neu) bzw. Reste entfernen
                 _server.Starten();
                 UpdatePruefung.DienstStarten(); // neue Version auf GitHub? (Hinweis in der Weboberfläche)
                 Ereignis.Schreiben(Ereignis.Gestartet, EventLogEntryType.Information,
@@ -64,7 +65,7 @@ namespace ITThemensammler
     }
 
     /// <summary>
-    /// Einträge in der Windows-Ereignisanzeige (Protokoll "Anwendung", Quelle "reitzner IT-Themensammler") für die Überwachung,
+    /// Einträge in der Windows-Ereignisanzeige (Protokoll "Anwendung", Quelle "IT-Themensammler") für die Überwachung,
     /// z. B. durch ein RMM-System. Feste Ereignis-IDs, siehe Liesmich.txt. Fehlermeldungen gleicher ID höchstens alle 10 Minuten.
     /// </summary>
     internal static class Ereignis
@@ -120,12 +121,12 @@ namespace ITThemensammler
 
     /// <summary>
     /// Dienst einrichten und steuern (aus dem Verwaltungsfenster, mit Administratorrechten). Beim Einrichten wird die EXE nach
-    /// "C:\Program Files\reitzner IT-Themensammler" kopiert und von dort als Dienst gestartet. So bleibt der Projekt- bzw.
+    /// "C:\Program Files\IT-Themensammler" kopiert und von dort als Dienst gestartet. So bleibt der Projekt- bzw.
     /// Download-Ordner frei, und eine neue Version wird über "Dienst aktualisieren" übernommen.
     /// </summary>
     internal static class DienstSteuerung
     {
-        public const string FirewallRegel = "reitzner IT-Themensammler";
+        public const string FirewallRegel = "IT-Themensammler";
         public const string FirewallRegelProxy = FirewallRegel + " (Anwendungsproxy)";
 
         public static string ProgrammOrdner
@@ -163,21 +164,58 @@ namespace ITThemensammler
             return DienstZustand.Unbekannt;
         }
 
+        /// <summary>
+        /// Programmdatei, die der eingerichtete Dienst startet (aus der Registrierung; null ohne Dienst). Weicht nach einem
+        /// Update aus der Zeit vor der Umbenennung kurz vom ProgrammPfad ab (alter Programmordner, siehe Umzug).
+        /// </summary>
+        public static string DienstPfad()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\" + Dienst.DienstName))
+                {
+                    string bild = key == null ? null : key.GetValue("ImagePath") as string;
+                    if (string.IsNullOrEmpty(bild)) return null;
+                    bild = Environment.ExpandEnvironmentVariables(bild.Trim());
+                    if (bild.StartsWith("\"")) { int e = bild.IndexOf('"', 1); return e > 1 ? bild.Substring(1, e - 1) : null; }
+                    int ex = bild.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+                    return ex > 0 ? bild.Substring(0, ex + 4) : bild;
+                }
+            }
+            catch { return null; }
+        }
+
         /// <summary>Version der eingerichteten Programmdatei (leer, wenn nicht vorhanden).</summary>
         public static string InstallierteVersion()
         {
             if (Demo.Active) return AppInfo.Version;
-            try { return File.Exists(ProgrammPfad) ? FileVersionInfo.GetVersionInfo(ProgrammPfad).FileVersion ?? "" : ""; }
+            try
+            {
+                string pfad = DienstPfad() ?? ProgrammPfad;
+                return File.Exists(pfad) ? FileVersionInfo.GetVersionInfo(pfad).FileVersion ?? "" : "";
+            }
             catch { return ""; }
         }
 
-        /// <summary>Läuft dieses Fenster aus einer anderen Datei als der eingerichtete Dienst und ist die Version neuer?</summary>
+        /// <summary>
+        /// Läuft dieses Fenster aus einer anderen Datei als der eingerichtete Dienst und ist die Version neuer?
+        /// Ebenso, wenn der Dienst noch im alten Programmordner (früherer Name) eingerichtet ist.
+        /// </summary>
         public static bool NeuereVersion()
         {
+            if (Demo.Active) return false;
+            string dienst = DienstPfad();
+            if (dienst != null && !SelbePfade(dienst, ProgrammPfad) && !SelbePfade(Application.ExecutablePath, dienst)) return true;
             string inst = InstallierteVersion();
-            if (Demo.Active || inst.Length == 0 || SelbePfade(Application.ExecutablePath, ProgrammPfad)) return false;
+            if (inst.Length == 0 || SelbePfade(Application.ExecutablePath, dienst ?? ProgrammPfad)) return false;
             Version a, b;
             return Version.TryParse(AppInfo.Version, out a) && Version.TryParse(inst, out b) && a > b;
+        }
+
+        /// <summary>Dienst auf den Programmpfad und den Anzeigenamen dieser Version umstellen.</summary>
+        public static void PfadSetzen()
+        {
+            Sc("config " + Dienst.DienstName + " binPath= \"\\\"" + ProgrammPfad + "\\\" " + Dienst.Argument + "\" DisplayName= \"" + AppInfo.Name + "\"");
         }
 
         /// <summary>Programm kopieren, Dienst anlegen (automatischer Start, Neustart bei Fehlern), Firewall freigeben und starten.</summary>
@@ -201,6 +239,11 @@ namespace ITThemensammler
             bool lief = Zustand() == DienstZustand.Laeuft;
             Beenden();
             ProgrammKopieren();
+            // früherer Programmname: Dienst auf den neuen Programmordner umstellen, Daten und Firewall übernehmen
+            PfadSetzen();
+            Umzug.Daten();
+            Umzug.Firewall();
+            Umzug.AltenOrdnerEntfernen();
             Ereignis.QuelleAnlegen();
             if (lief) Starten();
             Speicher.Protokoll("Dienst aktualisiert auf Version " + AppInfo.Version);
@@ -311,12 +354,22 @@ namespace ITThemensammler
 
         // ------------------------------------------------------------------ Hilfen
 
+        /// <summary>PowerShell-Befehl unsichtbar ausführen; Rückgabe: Exit-Code (-1 bei Fehler).</summary>
+        public static int PowerShell(string befehl)
+        {
+            try
+            {
+                return Ausfuehren("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"" + befehl.Replace("\"", "\\\"") + "\"", true);
+            }
+            catch { return -1; }
+        }
+
         private static void Sc(string argumente, bool fehlerEgal = false)
         {
             Ausfuehren(Path.Combine(Environment.SystemDirectory, "sc.exe"), argumente, fehlerEgal);
         }
 
-        private static void Ausfuehren(string programm, string argumente, bool fehlerEgal)
+        private static int Ausfuehren(string programm, string argumente, bool fehlerEgal)
         {
             var psi = new ProcessStartInfo(programm, argumente)
             {
@@ -333,10 +386,11 @@ namespace ITThemensammler
                 p.WaitForExit(30000);
                 if (!fehlerEgal && p.ExitCode != 0)
                     throw new InvalidOperationException(Path.GetFileName(programm) + " " + argumente + "\r\n\r\n" + aus.Trim());
+                return p.ExitCode;
             }
         }
 
-        private static bool SelbePfade(string a, string b)
+        internal static bool SelbePfade(string a, string b)
         {
             try { return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
             catch { return false; }

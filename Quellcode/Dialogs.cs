@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Meldungen, Rückfragen und Tooltips im Programmdesign
+// IT-Themensammler – Meldungen, Rückfragen und Tooltips im Programmdesign
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later

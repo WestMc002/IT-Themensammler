@@ -1,4 +1,4 @@
-# reitzner IT-Themensammler
+# IT-Themensammler
 
 **[English](#english) · [Deutsch](#deutsch)**
 
@@ -60,7 +60,7 @@
   </tr>
 </table>
 
-The screenshots show made-up sample data and are created automatically when building (`"reitzner IT-Themensammler.exe" --screenshots`). · Die Screenshots zeigen erfundene Beispieldaten. Sie entstehen automatisch beim Erstellen.
+The screenshots show made-up sample data and are created automatically when building (`"IT-Themensammler.exe" --screenshots`). · Die Screenshots zeigen erfundene Beispieldaten. Sie entstehen automatisch beim Erstellen.
 </details>
 
 Author / Autor: Günther Schoder · [www.westmc002.de](https://www.westmc002.de)
@@ -90,13 +90,13 @@ Web interface and management window in Windows 11 style (light and dark). The us
 
 ### Installation
 
-1. Download `reitzner-IT-Themensammler-<version>.zip` from the [Releases](https://github.com/WestMc002/reitzner-IT-Themensammler/releases).
-2. Unzip it into a folder of its own and start `reitzner IT-Themensammler.exe` (asks for administrator rights).
+1. Download `IT-Themensammler-<version>.zip` from the [Releases](https://github.com/WestMc002/IT-Themensammler/releases).
+2. Unzip it into a folder of its own and start `IT-Themensammler.exe` (asks for administrator rights).
 3. In the management window check the port, click "Dienst einrichten" (set up service) and create an admin account.
 4. Open the address (e.g. `http://server:8080`) in the browser, sign in as admin and add locations, users and dates under "Verwaltung".
 
 Requirements: Windows 10/11 or Windows Server with .NET Framework 4.x.
-The service copies itself to `C:\Program Files\reitzner IT-Themensammler`; the data is stored in `C:\ProgramData\reitzner IT-Themensammler` (readable by administrators and SYSTEM only).
+The service copies itself to `C:\Program Files\IT-Themensammler`; the data is stored in `C:\ProgramData\IT-Themensammler` (readable by administrators and SYSTEM only).
 
 ### Building from source
 
@@ -126,13 +126,13 @@ Weboberfläche und Verwaltungsfenster im Design von Windows 11 (hell und dunkel)
 
 ### Installation
 
-1. `reitzner-IT-Themensammler-<Version>.zip` aus den [Releases](https://github.com/WestMc002/reitzner-IT-Themensammler/releases) herunterladen.
-2. In einen eigenen Ordner entpacken und `reitzner IT-Themensammler.exe` starten (fragt nach Administratorrechten).
+1. `IT-Themensammler-<Version>.zip` aus den [Releases](https://github.com/WestMc002/IT-Themensammler/releases) herunterladen.
+2. In einen eigenen Ordner entpacken und `IT-Themensammler.exe` starten (fragt nach Administratorrechten).
 3. Im Verwaltungsfenster den Port prüfen, „Dienst einrichten“ klicken und ein Admin-Konto anlegen.
 4. Die Adresse (z. B. `http://server:8080`) im Browser öffnen, als Admin anmelden und unter „Verwaltung“ Standorte, Benutzer und Termine anlegen.
 
 Voraussetzungen: Windows 10/11 oder Windows Server mit .NET Framework 4.x.
-Der Dienst kopiert sich nach `C:\Program Files\reitzner IT-Themensammler`; die Daten liegen unter `C:\ProgramData\reitzner IT-Themensammler` (nur für Administratoren und SYSTEM lesbar).
+Der Dienst kopiert sich nach `C:\Program Files\IT-Themensammler`; die Daten liegen unter `C:\ProgramData\IT-Themensammler` (nur für Administratoren und SYSTEM lesbar).
 Einzelheiten zu Domänen-Anmeldung, Active Directory, Überwachung und Updates stehen in der `Liesmich.txt`.
 
 ### Selbst kompilieren
@@ -145,7 +145,7 @@ Die Version (Haupt.Neben.Jahr.MonatTag) wird dabei automatisch hochgezählt, die
 | Path · Pfad | Content · Inhalt |
 |---|---|
 | `Quellcode` | C# source (WinForms, Windows service, web server, .NET Framework 4) and `app.manifest` · C#-Quelldateien (WinForms, Windows-Dienst, Webserver) und `app.manifest` |
-| `Resources` | icon, reitzner logo, sample data `Demo.json` for the screenshots and the web interface `Web`, embedded into the EXE · Icon, reitzner-Logo, Beispieldaten `Demo.json` für die Screenshots und die Weboberfläche `Web`, in die EXE eingebettet |
+| `Resources` | icon, GS logo, sample data `Demo.json` for the screenshots and the web interface `Web`, embedded into the EXE · Icon, GS-Logo, Beispieldaten `Demo.json` für die Screenshots und die Weboberfläche `Web`, in die EXE eingebettet |
 | `Screenshots` | images for this page (sample data) · Bilder für diese Seite (Beispieldaten) |
 | `Erstellen.bat` | build script · Build-Skript |
 | `Liesmich.txt` | manual and version history (German) · Anleitung und Versionsgeschichte (Deutsch) |
@@ -156,6 +156,6 @@ GNU General Public License v3.0 or later · GNU General Public License v3.0 oder
 
 © 2026 Günther Schoder
 
-**Exception / Ausnahme:** The reitzner logo (`Resources/Logo-hell.png`, `Resources/Logo-dunkel.png`) is a trademark of reitzner AG and excluded from the GPL. All rights reserved; it may only be redistributed unchanged together with this program. · Das reitzner-Logo (`Resources/Logo-hell.png`, `Resources/Logo-dunkel.png`) ist eine Marke der reitzner AG und von der GPL ausgenommen. Alle Rechte vorbehalten; es darf nur zusammen mit diesem Programm in unveränderter Form weitergegeben werden.
+**Exception / Ausnahme:** The GS logo (`Resources/GS-Logo.png`) is excluded from the GPL. All rights reserved; it may only be redistributed unchanged together with this program. · Das GS-Logo (`Resources/GS-Logo.png`) ist von der GPL ausgenommen. Alle Rechte vorbehalten; es darf nur zusammen mit diesem Programm in unveränderter Form weitergegeben werden.
 
 Windows, Active Directory, Microsoft 365 and Microsoft Entra are trademarks of Microsoft Corporation. This project is not affiliated with or endorsed by Microsoft. · Windows, Active Directory, Microsoft 365 und Microsoft Entra sind Marken der Microsoft Corporation. Dieses Projekt ist nicht mit Microsoft verbunden und wird nicht von Microsoft unterstützt.

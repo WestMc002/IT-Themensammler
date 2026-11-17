@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Übernahme der bisherigen Excel-Liste (reitzner IT-Support.xlsm: Blätter "Anfragen" und "Daten")
+// IT-Themensammler – Übernahme der bisherigen Excel-Liste (*.xlsm bzw. *.xlsx: Blätter "Anfragen" und "Daten")
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later

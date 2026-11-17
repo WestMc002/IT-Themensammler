@@ -1,5 +1,5 @@
-﻿reitzner IT-Themensammler
-=========================
+﻿IT-Themensammler
+================
 Mitarbeiter des Kunden tragen IT-Themen in eine Liste ein, die beim nächsten
 Vor-Ort-Termin abgearbeitet werden. Das Programm läuft als Windows-Dienst auf
 einem Server des Kunden und stellt die Weboberfläche im internen Netz bereit
@@ -11,22 +11,22 @@ Versionsnummer: Haupt.Neben.Jahr.MonatTag (z. B. 1.0.2026.1109).
 Die Hauptversion steht in Erstellen.bat (MAJOR), die Nebenversion wird bei
 jedem Erstellen automatisch um eins erhöht (höchste vorhandene Version + 1).
 Bei Fehlern bleibt die alte EXE unverändert; Details stehen in Erstellen.log.
-Die Weboberfläche (Resources\Web), das Icon und das reitzner-Logo werden in
+Die Weboberfläche (Resources\Web), das Icon und das GS-Logo werden in
 die EXE eingebettet. Erstellen.bat folgt der Standard-Vorlage (Globale Richtlinien).
 
 Backup
 Nach jedem erfolgreichen Erstellen wird das gesamte Projekt in einen eigenen
-Versionsordner kopiert: Backup\reitzner IT-Themensammler v<Version>
+Versionsordner kopiert: Backup\IT-Themensammler v<Version>
 
 Einrichten beim Kunden
-1. "reitzner IT-Themensammler.exe" (und Liesmich.txt) auf den Server kopieren
+1. "IT-Themensammler.exe" (und Liesmich.txt) auf den Server kopieren
    und starten. Das Programm fragt nach Administratorrechten.
 2. Unter "Admin-Konten" mindestens ein Konto anlegen (Name und Kennwort,
    mindestens 8 Zeichen).
 3. Unter "Webserver" bei Bedarf den Port ändern (Standard 8080) und speichern.
 4. "Dienst einrichten": Das Programm wird nach
-   C:\Program Files\reitzner IT-Themensammler kopiert und als Dienst
-   "reitzner IT-Themensammler" (Dienstname ITThemensammler) eingerichtet:
+   C:\Program Files\IT-Themensammler kopiert und als Dienst
+   "IT-Themensammler" (Dienstname ITThemensammler) eingerichtet:
    Start automatisch (verzögert) mit Windows, auch ohne angemeldeten Benutzer,
    Neustart bei Fehlern, Firewall-Regel für den Port (Domäne und Privat).
 5. Die angezeigte Adresse (z. B. http://server:8080/) an die Mitarbeiter geben.
@@ -37,7 +37,7 @@ Neue Version: neue EXE starten und "Dienst aktualisieren" wählen.
 C:\Program Files – die Daten bleiben erhalten.
 
 Daten
-Alle Daten liegen in %ProgramData%\reitzner IT-Themensammler (nur für
+Alle Daten liegen in %ProgramData%\IT-Themensammler (nur für
 Administratoren und SYSTEM lesbar):
   daten.json           Themen und Stammdaten (Standorte, Benutzer, Termine)
   einstellungen.json   Port, Texte, Admin-Konten (Kennwörter nur als Prüfwert)
@@ -49,7 +49,7 @@ Administratoren und SYSTEM lesbar):
   Fehler.log           Fehler mit Einzelheiten
 Den Ordner in die Datensicherung des Kunden aufnehmen.
 Daten übernehmen: Verwaltungsfenster › Daten › "Daten übernehmen …"
-- Excel-Liste (reitzner IT-Support.xlsm bzw. .xlsx):
+- Excel-Liste (.xlsm bzw. .xlsx, bisherige Themenliste):
   Blatt "Anfragen" ab Zeile 3 (Standort, Benutzer, Wunschtermin, Problem,
   Erledigt, Datum) und Blatt "Daten" (Standorte, Benutzer, Termine). Die Themen
   werden hinzugefügt, schon vorhandene übersprungen (mehrfaches Übernehmen
@@ -209,9 +209,10 @@ Admins melden sich oben rechts mit "Anmelden" an und können dann:
 - Überschrift, Unterzeile, Kunde sowie E-Mail und Hotline für dringende
   Probleme ändern. E-Mail und Hotline sind nach der Einrichtung leer – bitte
   eintragen, sonst fehlt im Formular der Hinweis für dringende Probleme.
-  Der Kunde steht oben in der Mitte (neben dem Kundenlogo bzw. statt des
-  Logos), im Tagesbericht und im Namen der CSV-Datei.
-- das Kundenlogo hochladen (PNG oder JPG, getrennt für hell und dunkel)
+  Der Kunde steht im Tagesbericht, im Namen der CSV-Datei und im Titel des
+  Browser-Tabs.
+- das Kundenlogo hochladen (PNG oder JPG, getrennt für hell und dunkel); es
+  steht oben links in der Weboberfläche (ohne Logo das Programm-Icon)
 - das eigene Kennwort ändern
 Die Anmeldung gilt 30 Minuten ab der letzten Aktion. Nach 5 Fehlversuchen ist
 sie für 2 Minuten gesperrt. Konto gelöscht oder Kennwort im Verwaltungsfenster
@@ -232,7 +233,7 @@ Termins) für den Vor-Ort-Termin.
   Dazu Version, Rechner, Port, Startzeit, Laufzeit und Zahl offener Themen.
   Ohne Anmeldung, ohne Inhalte der Themen.
 - Windows-Ereignisanzeige, Protokoll "Anwendung", Quelle
-  "reitzner IT-Themensammler":
+  "IT-Themensammler":
     1000  Information  Dienst gestartet
     1001  Information  Dienst beendet
     1002  Information  Dienst eingerichtet
@@ -273,7 +274,7 @@ Updates
   Dienst, fragt Windows dabei jedes Mal nach Administratorrechten.
 - "Jetzt aktualisieren" lädt das ZIP des Releases, beendet das
   Verwaltungsfenster und den Dienst, ersetzt Programm und Liesmich im
-  Programmordner des Dienstes (C:\Program Files\reitzner IT-Themensammler,
+  Programmordner des Dienstes (C:\Program Files\IT-Themensammler,
   Sicherung als .alt, bei Fehlern zurück zur alten Version), startet den Dienst
   und das Verwaltungsfenster neu und meldet dort das Ergebnis. Die
   Weboberfläche ist dabei einige Sekunden nicht erreichbar; Themen,
@@ -289,10 +290,28 @@ Mitarbeiter: Anmeldung mit dem Domänenkonto oder von außen mit dem
 Microsoft-365-Konto über den Entra-Anwendungsproxy (siehe oben).
 
 Design: Verwaltungsfenster im Windows-11-Stil (helles/dunkles Design und
-Akzentfarbe aus Windows). Weboberfläche mit reitzner-Grün, hell/dunkel folgt
-Windows. Überall das reitzner-Logo (reitzner-Projekt).
+Akzentfarbe aus Windows). Fußzeile: links Jahr und Programmname, rechts die
+Website [www.westmc002.de](https://www.westmc002.de) (ein Klick öffnet sie).
+Weboberfläche mit grüner Akzentfarbe und dem Programm-Icon, hell/dunkel folgt
+Windows.
+
+Früherer Name
+Bis Version 1.22 hatte der Programmname noch einen Namenszusatz. Neue
+Versionen ziehen eine solche Installation beim ersten Start selbst um (auch
+beim automatischen Update): Daten aus %ProgramData%\<alter Name> nach
+%ProgramData%\IT-Themensammler, Programm nach C:\Program Files\
+IT-Themensammler, Dienst (Dienstname bleibt ITThemensammler) und
+Firewall-Regeln. Der Dienst startet dabei einmal kurz neu; im Protokoll steht
+"Daten … übernommen" bzw. "Programm … umgezogen". Läuft noch ein Dienst der
+alten Version, übernimmt das Verwaltungsfenster die Daten erst mit "Dienst
+aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
+der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.24  Neuer Name „IT-Themensammler“ (ohne Namenszusatz); Info-Fenster mit
+      GS-Logo, Fußzeile mit Jahr, Programmname und Website; Programm-Icon in der
+      Weboberfläche (bzw. oben links das Kundenlogo); bestehende Installationen
+      ziehen automatisch um
 1.22  Update-Prüfung kurz nach jedem Start; „Automatisch aktualisieren“ (der
       Dienst installiert neue Versionen selbst, sobald nichts los ist)
 1.21  Info-Fenster: Zeile „Updates“ neu (gleiches Raster wie die Zeilen darüber,
@@ -305,7 +324,7 @@ Versionen
       „Büro“ bzw. „Abteilung“ vorschlagen; Benutzer umbenennen bzw. zusammenführen;
       AD-Abgleich: Ausschluss nach Namen, Konten ohne Anzeigenamen übernehmen;
       Kundenname im Kopf und im Dateinamen des Tagesberichts
-1.5   Excel-Liste übernehmen (reitzner IT-Support.xlsm), Statusadresse /api/status
+1.5   Excel-Liste übernehmen (.xlsm), Statusadresse /api/status
       und Einträge in der Windows-Ereignisanzeige für die Überwachung;
       Verwaltungsfenster: Knöpfe der Dienst-Karte, Fenster mittig, Höhe veränderbar
       Weboberfläche: Tagesbericht (Drucken/PDF, CSV, Text), Hinweis für dringende

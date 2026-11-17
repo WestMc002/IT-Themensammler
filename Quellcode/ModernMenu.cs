@@ -1,4 +1,4 @@
-// reitzner IT-Themensammler – Menüs im Windows-11-Stil (Vorlage: Monitor Dimmer, ModernMenu.cs)
+// IT-Themensammler – Menüs im Windows-11-Stil (Vorlage: Monitor Dimmer, ModernMenu.cs)
 // Copyright (C) 2026 Günther Schoder · https://www.westmc002.de
 // Lizenz: GNU General Public License v3.0 oder später (siehe LICENSE)
 // SPDX-License-Identifier: GPL-3.0-or-later

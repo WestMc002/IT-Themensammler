@@ -1,5 +1,5 @@
 /*
- * reitzner IT-Themensammler - Weboberfläche
+ * IT-Themensammler - Weboberfläche
  * Themen eintragen und ansehen: alle. Eigene offene Themen bearbeiten und löschen: Ersteller (angemeldetes Domänenkonto
  * oder Besitzer-Schlüssel im Browser).
  * Alle Themen bearbeiten, erledigen, löschen und Verwaltung: angemeldeter Admin.
@@ -380,11 +380,10 @@ function kopfZeichnen() {
   $("untertitel").textContent = a.untertitel || "";
   document.title = (a.titel || "IT-Themensammlung") + (a.kunde ? " · " + a.kunde : "");
   var v = encodeURIComponent(a.logoStand || "");
+  // Kundenlogo oben links statt des Programm-Icons (ohne Logo bleibt das Icon)
   var mitLogo = !!(a.logoHell || a.logoDunkel);
-  $("kunde").hidden = !mitLogo && !a.kunde;
   $("kunde-bild").hidden = !mitLogo;
-  $("kunde-name").textContent = a.kunde || "";
-  $("kunde").classList.toggle("nur-name", !mitLogo);
+  $("marke-icon").hidden = mitLogo;
   if (mitLogo) {
     var hell = "/logo/kunde-hell.png?v=" + v, dunkel = "/logo/kunde-dunkel.png?v=" + v;
     if ($("kunde-hell").getAttribute("src") !== hell) $("kunde-hell").setAttribute("src", hell);
@@ -411,7 +410,7 @@ function kopfZeichnen() {
   $("version-knopf").textContent = "v" + (p.version || "");
   $("info-version").textContent = "Version " + (p.version || "");
   $("info-firma").textContent = p.firma || "";
-  document.querySelectorAll(".prog-name").forEach(function (e) { e.textContent = p.name || "reitzner IT-Themensammler"; });
+  document.querySelectorAll(".prog-name").forEach(function (e) { e.textContent = p.name || "IT-Themensammler"; });
 }
 
 // Standort, den dieser Benutzer zuletzt angegeben hat (aus seinem neuesten Thema), sonst leer
@@ -1291,7 +1290,7 @@ function updateZeichnen() {
   $("update-hinweis").hidden = !u;
   if (!u) return;
   $("update-text").textContent = "Neue Version " + u.version + " verfügbar – installiert ist " + ((stand.programm || {}).version || "?") + ".";
-  $("update-seite").href = /^https:\/\/github\.com\//.test(u.seite || "") ? u.seite : "https://github.com/WestMc002/reitzner-IT-Themensammler/releases";
+  $("update-seite").href = /^https:\/\/github\.com\//.test(u.seite || "") ? u.seite : "https://github.com/WestMc002/IT-Themensammler/releases";
 }
 
 function adZeichnen() {
@@ -1790,7 +1789,7 @@ function berichtZeichnen() {
     var c2 = to.insertRow(-1).insertCell(-1);
     c2.colSpan = 4; c2.className = "leer"; c2.textContent = "Keine offenen Themen.";
   }
-  $("b-fuss").textContent = "Erstellt " + b.erstellt + " · " + ((stand.programm || {}).name || "reitzner IT-Themensammler");
+  $("b-fuss").textContent = "Erstellt " + b.erstellt + " · " + ((stand.programm || {}).name || "IT-Themensammler");
 }
 
 function csvFeld(v) {
