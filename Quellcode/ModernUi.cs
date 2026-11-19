@@ -1194,9 +1194,9 @@ namespace ITThemensammler
                 moreBox.Text = st.More ?? "";
                 if (!hasMore && expand != null) expand(false); // kein Detailtext mehr: Feld zuklappen
                 more.Visible = hasMore;
-                // "Details" etwa ein Leerzeichen hinter dem Text; ohne Text bündig unter der Überschrift
+                // "Details" etwa ein Leerzeichen hinter dem Text (+ S(3), sonst überlappt es den Text); ohne Text bündig unter der Überschrift
                 int textEnd = hasDetail
-                    ? tx + Math.Min(TextRenderer.MeasureText(st.Detail, detail.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width - S(3), detail.Width)
+                    ? tx + Math.Min(TextRenderer.MeasureText(st.Detail, detail.Font, Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix).Width, detail.Width) + S(3)
                     : tx;
                 more.Bounds = new Rectangle(textEnd, dy, Math.Max(1, moreW), S(20));
                 more.BringToFront();

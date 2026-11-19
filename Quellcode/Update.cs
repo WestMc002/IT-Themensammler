@@ -633,9 +633,26 @@ if (-not $NoStart) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' 
 
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Invalidate(); }
 
+        /// <summary>Farbe des Fensters hinter der Leiste (für die Ecken außerhalb der abgerundeten Fläche).</summary>
+        private Color Hintergrund { get { return Parent != null ? Parent.BackColor : Ui.Back; } }
+
+        /// <summary>
+        /// Die Knöpfe zeichnen ihre abgerundeten Ecken in der Hintergrundfarbe ihres Elternelements (BackColor der Leiste).
+        /// Deshalb ist BackColor die eingefärbte Fläche der Leiste und nicht die Fensterfarbe – sonst stehen helle Ecken um die Knöpfe.
+        /// </summary>
+        private void FlaecheSetzen()
+        {
+            Color fill = Accent.Mix(Ui.Primary, Hintergrund, 0.14);
+            if (BackColor != fill) BackColor = fill;
+        }
+
+        protected override void OnParentChanged(EventArgs e) { base.OnParentChanged(e); FlaecheSetzen(); }
+        protected override void OnParentBackColorChanged(EventArgs e) { FlaecheSetzen(); base.OnParentBackColorChanged(e); }
+
         protected override void OnLayout(LayoutEventArgs e)
         {
             base.OnLayout(e);
+            FlaecheSetzen();
             if (Install == null || Page == null || Later == null) return; // schon beim Setzen der Schrift im Konstruktor
             int x = Width - (int)(12 * k);
             foreach (var b in new[] { Later, Page, Install })
@@ -649,11 +666,12 @@ if (-not $NoStart) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' 
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            Color back = Parent != null ? Parent.BackColor : Ui.Back;
+            FlaecheSetzen();
+            Color back = Hintergrund;
             g.Clear(back);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             using (var p = Ui.Rounded(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), 8 * k))
-            using (var b = new SolidBrush(Accent.Mix(Ui.Primary, back, 0.14)))
+            using (var b = new SolidBrush(BackColor))
             using (var pen = new Pen(Accent.Mix(Ui.Primary, back, 0.45)))
             {
                 g.FillPath(b, p);
