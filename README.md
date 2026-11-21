@@ -85,7 +85,7 @@ Web interface and management window in Windows 11 style (light and dark). The us
 - **Per customer** – heading, customer logo (light and dark), e-mail and hotline for urgent problems, whether staff see completed topics, retention period for completed topics (delete, optionally archive as CSV)
 - **Windows service** – starts with Windows, restarts on failure, firewall rule; set up, update and remove in the management window
 - **Monitoring** – `/api/status` for monitoring tools, Windows event log entries, log file and daily backup of the data
-- **Updates** – checks GitHub for a new version shortly after every start; "Jetzt aktualisieren" updates program and service, optionally automatically when idle
+- **Updates** – checks GitHub for a new version shortly after every start; "Jetzt aktualisieren" updates program and service, optionally automatically when idle; only signed updates are installed
 - **Import** – topics and master data from the previous Excel list
 
 ### Installation
@@ -121,7 +121,7 @@ Weboberfläche und Verwaltungsfenster im Design von Windows 11 (hell und dunkel)
 - **Anpassbar je Kunde** – Überschrift, Kundenlogo (hell und dunkel), E-Mail und Hotline für dringende Probleme, ob Mitarbeiter erledigte Themen sehen, Löschfrist für erledigte Themen (löschen, auf Wunsch vorher als CSV archivieren)
 - **Windows-Dienst** – startet mit Windows, Neustart bei Ausfall, Firewall-Regel; einrichten, aktualisieren und entfernen im Verwaltungsfenster
 - **Überwachung** – `/api/status` für das Überwachungsprogramm, Einträge in der Ereignisanzeige, Protokoll und tägliche Sicherung der Daten
-- **Updates** – sucht kurz nach jedem Start auf GitHub nach einer neuen Version; „Jetzt aktualisieren“ aktualisiert Programm und Dienst, auf Wunsch automatisch, sobald nichts los ist
+- **Updates** – sucht kurz nach jedem Start auf GitHub nach einer neuen Version; „Jetzt aktualisieren“ aktualisiert Programm und Dienst, auf Wunsch automatisch, sobald nichts los ist; installiert werden nur signierte Updates
 - **Übernahme** – Themen und Stammdaten aus der bisherigen Excel-Liste
 
 ### Installation
@@ -147,6 +147,7 @@ Die Version (Haupt.Neben.Jahr.MonatTag) wird dabei automatisch hochgezählt, die
 | `Quellcode` | C# source (WinForms, Windows service, web server, .NET Framework 4) and `app.manifest` · C#-Quelldateien (WinForms, Windows-Dienst, Webserver) und `app.manifest` |
 | `Resources` | icon, GS logo, sample data `Demo.json` for the screenshots and the web interface `Web`, embedded into the EXE · Icon, GS-Logo, Beispieldaten `Demo.json` für die Screenshots und die Weboberfläche `Web`, in die EXE eingebettet |
 | `Screenshots` | images for this page (sample data) · Bilder für diese Seite (Beispieldaten) |
+| `Release` | signed release package: ZIP and manifest with the signed SHA-256 · signiertes Release-Paket: ZIP und Manifest mit der signierten SHA-256 |
 | `Erstellen.bat` | build script · Build-Skript |
 | `Liesmich.txt` | manual and version history (German) · Anleitung und Versionsgeschichte (Deutsch) |
 

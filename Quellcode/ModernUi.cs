@@ -111,7 +111,15 @@ namespace ITThemensammler
 
         public static void Open(string path)
         {
-            try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+            try
+            {
+                // Ordner mit dem Explorer über seinen festen Pfad öffnen (nie über den Suchpfad)
+                if (Directory.Exists(path))
+                    Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                        "\"" + path.TrimEnd('\\') + "\"") { UseShellExecute = false });
+                else
+                    Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            }
             catch { }
         }
 

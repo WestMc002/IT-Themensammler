@@ -1,24 +1,25 @@
+# IT-Themensammler - Release aus dem signierten Release-Paket
+# Das Paket entsteht auf dem PC des Herausgebers (Erstellen.bat: ZIP mit IT-Themensammler.exe und
+# Liesmich.txt, dazu ein mit dem privaten Schluessel signiertes Manifest) und liegt im Ordner
+# Release. Der Workflow baut nichts selbst: Er prueft, dass ZIP und Manifest zur Version
+# passen (Name, Version, SHA-256 - die Signatur prueft erst das Programm, der Schluessel ist nicht
+# auf GitHub), und haengt beide an das Release.
+# Ausloeser: neues Manifest im Ordner Release bzw. Aenderung dieser Datei auf main oder per Hand
+# ueber "Run workflow" (Eingabe der Versionsnummer). Ohne Eingabe gilt die Version des Manifests
+# im Ordner Release.
+# Gibt es das Release zur Version schon, wird nur der Text aufgefrischt.
+
 name: Release
 
-# Release v<Version> mit "IT-Themensammler-<Version>.zip" ("IT-Themensammler.exe" + Liesmich.txt).
-# Die Update-Prüfung im Programm sucht genau diese ZIP-Datei im neuesten Release.
-# Release-Seite: oben "Änderungen" (Punkte aus dem Commit-Text zur Version), darunter die Installation.
-# - Run workflow (Versionsnummer) oder Tag v<Version>: Release anlegen; gibt es es schon,
-#   wird nichts neu gebaut, nur der Release-Text aufgefrischt.
-# - Änderung dieser Datei auf main: Release-Texte aller vorhandenen Releases auffrischen.
 on:
   push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/release.yml'
-    tags:
-      - 'v*'
+    branches: [main]
+    paths: [.github/workflows/release.yml, 'Release/*.manifest']
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version, z. B. 1.18.2026.1112'
-        required: true
+        description: 'Version (z. B. 1.32.2026.1121)'
+        required: false
 
 permissions:
   contents: write
@@ -26,117 +27,96 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # ganze Historie, um den Commit zur Version zu finden
+          fetch-depth: 0
 
-      - name: Versionen bestimmen
+      - name: Version lesen
         id: ver
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $existing = @(gh release list --repo "${{ github.repository }}" --limit 100 --json tagName --jq '.[].tagName' | ForEach-Object { $_.TrimStart('v') })
-          $new = ''
-          if ('${{ github.event_name }}' -eq 'workflow_dispatch') { $v = '${{ github.event.inputs.version }}'.TrimStart('v') }
-          elseif ('${{ github.ref_type }}' -eq 'tag') { $v = '${{ github.ref_name }}'.TrimStart('v') }
-          else { $v = '' }   # Änderung des Workflows: nur Texte auffrischen
-          if ($v) {
-            if ($v -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Ungültige Version: $v" }
-            if ($existing -notcontains $v) { $new = $v }
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $ver = '${{ github.event.inputs.version }}'.TrimStart('v')
+          if(-not $ver) {
+            $m = @(Get-ChildItem -LiteralPath 'Release' -Filter 'IT-Themensammler-*.manifest' -File -ErrorAction SilentlyContinue)
+            if($m.Count -eq 1 -and $m[0].Name -match '^IT-Themensammler-(\d+\.\d+\.\d+\.\d+)\.manifest$') { $ver = $Matches[1] }
           }
-          $refresh = if ($v) { @($existing | Where-Object { $_ -eq $v }) } else { $existing }
-          "new=$new" >> $env:GITHUB_OUTPUT
-          "refresh=$($refresh -join ' ')" >> $env:GITHUB_OUTPUT
-          Write-Host "Neu: '$new' / Text auffrischen: '$($refresh -join ' ')'"
+          if($ver -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "keine gueltige Version gefunden: $ver" }
+          "ver=$ver" >> $env:GITHUB_OUTPUT
+          gh release view "v$ver" *> $null
+          if($LASTEXITCODE -eq 0) { "exists=1" >> $env:GITHUB_OUTPUT; Write-Host "Release v$ver existiert bereits - nur Text auffrischen" }
+          else { "exists=0" >> $env:GITHUB_OUTPUT; Write-Host "Neues Release v$ver" }
+          exit 0
 
-      - name: Release-Texte erstellen
+      - name: Release-Text erstellen
         shell: pwsh
         run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()   # Umlaute aus git richtig lesen
-          New-Item -ItemType Directory -Path 'notes' -Force | Out-Null
-          $all = @('${{ steps.ver.outputs.new }}') + ('${{ steps.ver.outputs.refresh }}' -split ' ') | Where-Object { $_ }
-          foreach ($ver in $all) {
-            # "Änderungen" = Zeilen mit "- " aus dem neuesten Commit, dessen Text die Version nennt
-            $sha = git log --format=%H -F --grep="$ver" -n 1
-            if (-not $sha) { $sha = git rev-parse HEAD }
-            $body = git log -1 --format=%b $sha
-            $items = @($body -split "`r?`n" | Where-Object { $_ -match '^\s*[-*] ' } | ForEach-Object { '- ' + ($_.Trim() -replace '^[-*]\s+', '') })
-            if ($items.Count -eq 0) { $items = @('- siehe Liesmich.txt') }
-            $lines = @('## Änderungen', '') + $items + @(
-              '',
-              '## Installation',
-              '',
-              "1. ``IT-Themensammler-$ver.zip`` herunterladen und in einen eigenen Ordner auf dem Server entpacken.",
-              '2. `IT-Themensammler.exe` starten (fragt nach Administratorrechten) und unter „Admin-Konten“ mindestens ein Konto anlegen.',
-              '3. Bei Bedarf den Port ändern (Standard 8080), unter „Aussehen“ in der Weboberfläche E-Mail und Hotline für dringende Probleme eintragen.',
-              '4. „Dienst einrichten“ wählen: Das Programm wird nach `C:\Program Files\IT-Themensammler` kopiert und läuft als Windows-Dienst. Die angezeigte Adresse (z. B. `http://server:8080/`) an die Mitarbeiter geben.',
-              '',
-              'Neue Version: Das Verwaltungsfenster zeigt sie oben an; „Jetzt aktualisieren“ tauscht Programm und Dienst aus. Alternativ die neue EXE starten und „Dienst aktualisieren“ wählen. Installationen bis 1.22 (früherer Programmname) ziehen dabei selbst auf den neuen Namen um.',
-              '',
-              'Voraussetzung: Windows 10/11 oder Windows Server mit .NET Framework 4.x. Ausführliche Beschreibung (Domänen-Anmeldung, Active Directory, Microsoft 365) und Versionsgeschichte: `Liesmich.txt` im ZIP.'
-            )
-            $lines | Set-Content -Path "notes\$ver.md" -Encoding utf8   # pwsh 7: UTF-8 ohne BOM
-            Write-Host "---- $ver"; Get-Content "notes\$ver.md"
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $ver = '${{ steps.ver.outputs.ver }}'
+          # neuester Commit, dessen Text die Versionsnummer nennt
+          $sha = git log --format=%H -F --grep="$ver" -n 1
+          $punkte = @()
+          if($sha) {
+            $punkte = @(git log -1 --format=%B $sha | Where-Object { $_ -match '^\s*- ' } | ForEach-Object { $_.Trim() })
           }
+          if($punkte.Count -eq 0) { $punkte = @('- siehe Liesmich.txt') }
+          $zeilen = New-Object System.Collections.Generic.List[string]
+          $zeilen.Add('## Änderungen'); $zeilen.Add('')
+          foreach($p in $punkte) { $zeilen.Add($p) }
+          $zeilen.Add('')
+          $zeilen.Add('## Installation')
+          $zeilen.Add('')
+          $zeilen.Add("1. ``IT-Themensammler-$ver.zip`` herunterladen und in einen eigenen Ordner auf dem Server entpacken.")
+          $zeilen.Add('2. `IT-Themensammler.exe` starten (fragt nach Administratorrechten) und unter „Admin-Konten“ mindestens ein Konto anlegen.')
+          $zeilen.Add('3. Bei Bedarf den Port ändern (Standard 8080), unter „Aussehen“ in der Weboberfläche E-Mail und Hotline für dringende Probleme eintragen.')
+          $zeilen.Add('4. „Dienst einrichten“ wählen: Das Programm wird nach `C:\Program Files\IT-Themensammler` kopiert und läuft als Windows-Dienst. Die angezeigte Adresse (z. B. `http://server:8080/`) an die Mitarbeiter geben.')
+          $zeilen.Add('')
+          $zeilen.Add('Neue Version: Das Verwaltungsfenster zeigt sie oben an; „Jetzt aktualisieren“ tauscht Programm und Dienst aus. Alternativ die neue EXE starten und „Dienst aktualisieren“ wählen.')
+          $zeilen.Add('')
+          $zeilen.Add("Signatur: ``IT-Themensammler-$ver.manifest`` ist die signierte Prüfsumme des ZIP. Das Programm installiert Updates nur, wenn diese Signatur gültig ist.")
+          $zeilen.Add('')
+          $zeilen.Add('Voraussetzung: Windows 10/11 oder Windows Server mit .NET Framework 4.x. Ausführliche Beschreibung (Domänen-Anmeldung, Active Directory, Microsoft 365) und Versionsgeschichte: `Liesmich.txt` im ZIP.')
+          [IO.File]::WriteAllText("$PWD\notes.md", ($zeilen -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content notes.md -Encoding utf8
 
-      - name: Kompilieren
-        if: steps.ver.outputs.new != ''
+      - name: Release-Paket pruefen
+        if: steps.ver.outputs.exists == '0'
         shell: pwsh
         run: |
-          $ver = '${{ steps.ver.outputs.new }}'
-          @(
-            "[assembly: System.Reflection.AssemblyVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyFileVersion(""$ver"")]"
-            "[assembly: System.Reflection.AssemblyInformationalVersion(""$ver"")]"
-            "namespace ITThemensammler { public static partial class AppInfo { public const string Version = ""$ver""; } }"
-          ) | Set-Content -Path 'Quellcode\VersionInfo.cs' -Encoding UTF8
-          $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-          if (-not (Test-Path $csc)) { $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe" }
-          & $csc /nologo /target:winexe /optimize+ /codepage:65001 "/out:IT-Themensammler.exe" `
-            "/win32icon:Resources\ITThemensammler.ico" "/resource:Resources\ITThemensammler.ico,ITThemensammler.ico" `
-            "/resource:Resources\GS-Logo.png,GS-Logo.png" `
-            /win32manifest:Quellcode\app.manifest `
-            "/resource:Resources\Web\index.html,Web.index.html" "/resource:Resources\Web\app.css,Web.app.css" "/resource:Resources\Web\app.js,Web.app.js" `
-            "/resource:Resources\Demo.json,Demo.json" `
-            /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-            /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll /r:System.IO.Compression.dll `
-            /r:System.Xml.dll /r:System.Xml.Linq.dll /r:System.DirectoryServices.dll /r:System.DirectoryServices.AccountManagement.dll `
-            Quellcode\*.cs
-          if ($LASTEXITCODE -ne 0) { throw "Kompilieren fehlgeschlagen" }
-
-      - name: ZIP packen
-        if: steps.ver.outputs.new != ''
-        shell: pwsh
-        run: |
-          # GitHub ersetzt Leerzeichen in Dateinamen von Release-Anhängen durch Punkte -
-          # im ZIP bleibt der Originalname "IT-Themensammler.exe" erhalten
-          $ver = '${{ steps.ver.outputs.new }}'
-          New-Item -ItemType Directory -Path 'paket' | Out-Null
-          Copy-Item 'IT-Themensammler.exe', 'Liesmich.txt' -Destination 'paket'
-          # Update älterer Versionen (bis 1.22): deren Update-Skript sucht im ZIP die EXE unter dem früheren Dateinamen;
-          # die neue Version zieht danach selbst auf den neuen Namen um (Quellcode\Umzug.cs)
-          New-Item -ItemType Directory -Path 'paket\Update-von-1.22' | Out-Null
-          Copy-Item 'IT-Themensammler.exe' -Destination ('paket\Update-von-1.22\' + 'reitzner IT-Themensammler.exe')
-          Compress-Archive -Path 'paket\*' -DestinationPath "IT-Themensammler-$ver.zip"
+          $ver = '${{ steps.ver.outputs.ver }}'
+          $zip = "Release\IT-Themensammler-$ver.zip"
+          $man = "Release\IT-Themensammler-$ver.manifest"
+          if(-not (Test-Path -LiteralPath $zip)) { throw "Im Ordner Release fehlt $zip" }
+          if(-not (Test-Path -LiteralPath $man)) { throw "Im Ordner Release fehlt $man" }
+          $bytes = [IO.File]::ReadAllBytes($man)
+          if([Array]::IndexOf($bytes, [byte]13) -ge 0) { throw 'Das Manifest enthaelt CR (Zeilenende muss LF sein, sonst passt die Signatur nicht)' }
+          $werte = @{}
+          foreach($z in ([Text.Encoding]::UTF8.GetString($bytes) -split "`n")) { if($z -match '^([A-Za-z0-9]+)=(.*)$') { $werte[$Matches[1]] = $Matches[2] } }
+          if($werte['Programm'] -cne 'IT-Themensammler') { throw "Manifest: Programm ist '$($werte['Programm'])'" }
+          if($werte['Version'] -cne $ver) { throw "Manifest: Version ist '$($werte['Version'])', erwartet $ver" }
+          if($werte['Datei'] -cne "IT-Themensammler-$ver.zip") { throw "Manifest: Datei ist '$($werte['Datei'])'" }
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($werte['SHA256'] -cne $hash) { throw "Manifest: SHA256 passt nicht zum ZIP ($hash)" }
+          if(-not $werte['Signatur']) { throw 'Manifest: Signatur fehlt' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $zip).Path)
+          try { $namen = @($z.Entries | ForEach-Object { $_.FullName }) } finally { $z.Dispose() }
+          if($namen -notcontains 'IT-Themensammler.exe') { throw 'Im ZIP fehlt IT-Themensammler.exe' }
+          Write-Host "Release-Paket in Ordnung: $($namen -join ', ') - SHA256 $hash, Schluessel $($werte['Schluessel'])"
 
       - name: Release anlegen
-        if: steps.ver.outputs.new != ''
+        if: steps.ver.outputs.exists == '0'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $ver = '${{ steps.ver.outputs.new }}'
-          gh release create "v$ver" "IT-Themensammler-$ver.zip" --repo "${{ github.repository }}" --title "IT-Themensammler $ver" --notes-file "notes\$ver.md"
+          $ver = '${{ steps.ver.outputs.ver }}'
+          gh release create "v$ver" "Release\IT-Themensammler-$ver.zip" "Release\IT-Themensammler-$ver.manifest" --title "IT-Themensammler $ver" --notes-file notes.md --target $env:GITHUB_SHA
 
-      - name: Release-Texte auffrischen
-        if: steps.ver.outputs.refresh != ''
+      - name: Release-Text auffrischen
+        if: steps.ver.outputs.exists == '1'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          foreach ($ver in ('${{ steps.ver.outputs.refresh }}' -split ' ' | Where-Object { $_ })) {
-            gh release edit "v$ver" --repo "${{ github.repository }}" --notes-file "notes\$ver.md"
-            if ($LASTEXITCODE -ne 0) { throw "Release-Text v$ver konnte nicht aktualisiert werden" }
-          }
+          $ver = '${{ steps.ver.outputs.ver }}'
+          gh release edit "v$ver" --notes-file notes.md

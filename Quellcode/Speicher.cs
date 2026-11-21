@@ -267,12 +267,23 @@ namespace ITThemensammler
         public static string BackupOrdner { get { return Path.Combine(Ordner, "Backup"); } }
         /// <summary>Bilder zu den Themen (eine Datei &lt;id&gt;.jpg je Thema).</summary>
         public static string AnhangOrdner { get { return Path.Combine(Ordner, "Anhaenge"); } }
-        public static string AnhangPfad(string id) { return Path.Combine(AnhangOrdner, id + ".jpg"); }
+        public static string AnhangPfad(string id)
+        {
+            // nur echte Themen-IDs: sonst könnte eine übernommene Datei auf andere Pfade zeigen
+            if (!GueltigeId(id)) throw new InvalidDataException("Ungültige Themen-ID.");
+            return Path.Combine(AnhangOrdner, id + ".jpg");
+        }
+
+        public static bool GueltigeId(string id)
+        {
+            return id != null && System.Text.RegularExpressions.Regex.IsMatch(id, "^[0-9a-f]{32}$");
+        }
         /// <summary>Archiv gelöschter erledigter Themen (Themen-JJJJ.csv), falls eingeschaltet.</summary>
         public static string ArchivOrdner { get { return Path.Combine(Ordner, "Archiv"); } }
 
         public static void AnhangLoeschen(string id)
         {
+            if (!GueltigeId(id)) return;
             try { if (File.Exists(AnhangPfad(id))) File.Delete(AnhangPfad(id)); }
             catch (Exception ex) { Fehler("Bild zu Thema " + id + " löschen", ex); }
         }
@@ -294,7 +305,31 @@ namespace ITThemensammler
         /// </summary>
         public static void OrdnerAnlegen()
         {
-            if (Directory.Exists(Ordner)) return;
+            string ordner = Ordner;
+            if (!Directory.Exists(ordner))
+            {
+                Directory.CreateDirectory(ordner, Schutz());
+                lock (Geprueft) Geprueft.Add(ordner);
+                return;
+            }
+            lock (Geprueft) if (Geprueft.Contains(ordner)) return;
+            // Vorhandener Ordner (z. B. von einer älteren Version oder anders angelegt): nicht umgeleitet und ebenso geschützt
+            if ((File.GetAttributes(ordner) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException("Der Datenordner ist umgeleitet (Verknüpfung): " + ordner);
+            var ist = Directory.GetAccessControl(ordner);
+            if (!ist.AreAccessRulesProtected || !NurAdminsUndSystem(ist))
+            {
+                try { Directory.SetAccessControl(ordner, Schutz()); }
+                catch (UnauthorizedAccessException) { return; } // ohne Administratorrechte (nur Anzeige): beim nächsten Start erneut
+            }
+            lock (Geprueft) Geprueft.Add(ordner);
+        }
+
+        private static readonly HashSet<string> Geprueft = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Rechte des Datenordners: nur SYSTEM und Administratoren, Vererbung von oben aus.</summary>
+        private static DirectorySecurity Schutz()
+        {
             var sec = new DirectorySecurity();
             sec.SetAccessRuleProtection(true, false);
             var vererbung = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
@@ -302,7 +337,17 @@ namespace ITThemensammler
                 FileSystemRights.FullControl, vererbung, PropagationFlags.None, AccessControlType.Allow));
             sec.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
                 FileSystemRights.FullControl, vererbung, PropagationFlags.None, AccessControlType.Allow));
-            Directory.CreateDirectory(Ordner, sec);
+            return sec;
+        }
+
+        private static bool NurAdminsUndSystem(DirectorySecurity sec)
+        {
+            var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            foreach (FileSystemAccessRule r in sec.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+                if (r.AccessControlType == AccessControlType.Allow && !r.IdentityReference.Equals(system) && !r.IdentityReference.Equals(admins))
+                    return false;
+            return true;
         }
 
         // ------------------------------------------------------------------ Daten (Themen und Stammdaten)
@@ -378,10 +423,25 @@ namespace ITThemensammler
         /// </summary>
         public static int Importieren(string datei)
         {
+            // Die Datei kann von außen kommen: erst vollständig lesen und prüfen, dann ersetzen
+            if (new FileInfo(datei).Length > 64L * 1024 * 1024) throw new InvalidDataException("Die Datei ist zu groß (höchstens 64 MB).");
             var neu = Json().Deserialize<DatenDatei>(TextLesen(datei));
             if (neu == null || (neu.anfragen == null && neu.stammdaten == null))
                 throw new InvalidDataException("Die Datei enthält keine Themen und keine Stammdaten.");
             neu.Vervollstaendigen();
+            if (neu.anfragen.Count > 100000) throw new InvalidDataException("Die Datei enthält zu viele Themen.");
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var a in neu.anfragen)
+            {
+                // IDs nur im erwarteten Format und eindeutig; Bilder nur, wenn es die Datei hier gibt
+                if (!GueltigeId(a.id) || !ids.Add(a.id)) { a.id = Guid.NewGuid().ToString("N"); ids.Add(a.id); a.bild = ""; }
+                if (a.bild.Length > 0 && !File.Exists(AnhangPfad(a.id))) a.bild = "";
+                a.standort = Kuerzen(a.standort, 100);
+                a.benutzer = Kuerzen(a.benutzer, 100);
+                a.problem = Kuerzen(a.problem, 4000);
+                a.notiz = Kuerzen(a.notiz, 2000);
+                a.hinweis = Kuerzen(a.hinweis, 2000);
+            }
             Sichern("vor-Import");
             lock (Sperre)
             {
@@ -391,6 +451,11 @@ namespace ITThemensammler
             }
             Protokoll("Daten übernommen aus " + datei + " (" + neu.anfragen.Count + " Themen)");
             return neu.anfragen.Count;
+        }
+
+        private static string Kuerzen(string text, int max)
+        {
+            return text.Length > max ? text.Substring(0, max) : text;
         }
 
         /// <summary>Aktuellen Stand von daten.json nach Backup\daten-&lt;anlass&gt;-JJJJ-MM-TT-HHmmss.json sichern (z. B. vor einem Import).</summary>
@@ -590,16 +655,35 @@ namespace ITThemensammler
         /// <summary>Änderungen und Anmeldungen (Protokoll.log im Datenordner).</summary>
         public static void Protokoll(string text)
         {
-            Schreiben("Protokoll.log", text);
+            Schreiben("Protokoll.log", Einzeilig(text));
         }
 
         /// <summary>Fehler mit Einzelheiten (Fehler.log im Datenordner).</summary>
         public static void Fehler(string text, Exception ex)
         {
-            Schreiben("Fehler.log", text + (ex == null ? "" : ": " + ex));
+            Schreiben("Fehler.log", Einzeilig(text) + (ex == null ? "" : ": " + ex)); // Einzelheiten der Ausnahme mehrzeilig
         }
 
         private static readonly object LogSperre = new object();
+
+        /// <summary>
+        /// Genau ein Eintrag je Ereignis: Steuerzeichen (z. B. Zeilenumbrüche in einem eingegebenen Kontonamen) werden
+        /// sichtbar maskiert, damit fremde Eingaben keine scheinbaren Protokollzeilen erzeugen.
+        /// </summary>
+        internal static string Einzeilig(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            var sb = new StringBuilder(text.Length);
+            foreach (char c in text)
+            {
+                if (c == '\r') sb.Append("\\r");
+                else if (c == '\n') sb.Append("\\n");
+                else if (c == '\t') sb.Append(' ');
+                else if (char.IsControl(c) || c == '\u2028' || c == '\u2029') sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                else sb.Append(c);
+            }
+            return sb.ToString();
+        }
 
         private static void Schreiben(string datei, string text)
         {
@@ -607,7 +691,7 @@ namespace ITThemensammler
             {
                 lock (LogSperre)
                 {
-                    Directory.CreateDirectory(Ordner);
+                    OrdnerAnlegen(); // dieselbe geschützte Anlage wie für die Daten
                     string pfad = Path.Combine(Ordner, datei);
                     // nicht endlos wachsen lassen: ab 2 MB die alte Datei als .alt.log aufheben
                     var fi = new FileInfo(pfad);

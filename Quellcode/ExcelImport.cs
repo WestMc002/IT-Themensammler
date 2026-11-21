@@ -43,6 +43,7 @@ namespace ITThemensammler
         public static Ergebnis Importieren(string datei)
         {
             Dictionary<int, Dictionary<string, Zelle>> anfragen, daten;
+            if (new FileInfo(datei).Length > MaxGroesse) throw new InvalidDataException("Die Excel-Datei ist zu groß (höchstens 64 MB).");
             using (var fs = new FileStream(datei, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var zip = new ZipArchive(fs, ZipArchiveMode.Read))
             {
@@ -138,13 +139,22 @@ namespace ITThemensammler
 
         // ------------------------------------------------------------------ Excel-Datei lesen
 
+        /// <summary>Höchstens 64 MB je Datei und je Eintrag (entpackt): Die Excel-Datei kann von außen kommen.</summary>
+        private const long MaxGroesse = 64L * 1024 * 1024;
+
+        private static Stream Oeffnen(ZipArchiveEntry e)
+        {
+            if (e.Length > MaxGroesse) throw new InvalidDataException("Die Excel-Datei ist zu groß (ein Teil hat mehr als 64 MB).");
+            return e.Open();
+        }
+
         private static List<string> GemeinsameTexte(ZipArchive zip)
         {
             var liste = new List<string>();
             var e = zip.GetEntry("xl/sharedStrings.xml");
             if (e == null) return liste;
             XDocument doc;
-            using (var s = e.Open()) doc = XDocument.Load(s);
+            using (var s = Oeffnen(e)) doc = XDocument.Load(s);
             foreach (var si in doc.Root.Elements(Main + "si"))
                 liste.Add(string.Concat(si.Descendants(Main + "t").Select(t => t.Value)));
             return liste;
@@ -158,7 +168,7 @@ namespace ITThemensammler
             if (relEintrag != null)
             {
                 XDocument rels;
-                using (var s = relEintrag.Open()) rels = XDocument.Load(s);
+                using (var s = Oeffnen(relEintrag)) rels = XDocument.Load(s);
                 foreach (var r in rels.Root.Elements(PackRel + "Relationship"))
                 {
                     string ziel = (string)r.Attribute("Target") ?? "";
@@ -170,7 +180,7 @@ namespace ITThemensammler
             var wb = zip.GetEntry("xl/workbook.xml");
             if (wb == null) throw new InvalidDataException("Die Datei ist keine Excel-Arbeitsmappe (.xlsx oder .xlsm).");
             XDocument doc;
-            using (var s = wb.Open()) doc = XDocument.Load(s);
+            using (var s = Oeffnen(wb)) doc = XDocument.Load(s);
             foreach (var sh in doc.Root.Descendants(Main + "sheet"))
             {
                 string id = (string)sh.Attribute(Rel + "id") ?? "";
@@ -186,7 +196,7 @@ namespace ITThemensammler
             var e = zip.GetEntry(pfad);
             if (e == null) throw new InvalidDataException("Blatt nicht gefunden: " + pfad);
             XDocument doc;
-            using (var s = e.Open()) doc = XDocument.Load(s);
+            using (var s = Oeffnen(e)) doc = XDocument.Load(s);
             var zeilen = new Dictionary<int, Dictionary<string, Zelle>>();
             foreach (var c in doc.Root.Descendants(Main + "c"))
             {

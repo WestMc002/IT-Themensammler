@@ -139,7 +139,7 @@ namespace ITThemensammler
                 Firewall();
                 Speicher.Protokoll("Programm nach " + DienstSteuerung.ProgrammOrdner + " umgezogen (früherer Programmname), der Dienst startet neu");
                 // Neustart aus dem neuen Ordner (das Hilfsprogramm läuft weiter, wenn der Dienst beendet wird)
-                Process.Start(new ProcessStartInfo("powershell.exe",
+                Process.Start(new ProcessStartInfo(UpdateCheck.PowerShellPfad,
                     "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"Start-Sleep -Seconds 5; Restart-Service -Name '" + Dienst.DienstName + "' -Force\"")
                 { UseShellExecute = false, CreateNoWindow = true });
                 return true;

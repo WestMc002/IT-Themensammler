@@ -96,9 +96,14 @@ namespace ITThemensammler
 
         private sealed class Sperrzeit
         {
-            public int Anzahl;
+            public int Anzahl;   // Fehlversuche
+            public int Laufend;  // gerade geprüfte Anmeldungen (zählen vorab als Versuch)
             public DateTime Bis;
+            public DateTime Zuletzt;
         }
+
+        /// <summary>Höchstens zwei Kennwortprüfungen gleichzeitig (jede ist absichtlich rechenaufwendig).</summary>
+        private static readonly SemaphoreSlim Pruefungen = new SemaphoreSlim(2);
 
         private readonly Dictionary<string, Sitzung> _sitzungen = new Dictionary<string, Sitzung>();
         private readonly Dictionary<string, MitarbeiterSitzung> _mitarbeiter = new Dictionary<string, MitarbeiterSitzung>();
@@ -194,11 +199,15 @@ namespace ITThemensammler
         private static long _letzteAenderung;
         public static DateTime LetzteAenderung { get { return new DateTime(Interlocked.Read(ref _letzteAenderung), DateTimeKind.Utc); } }
 
+        private static bool KeineAenderung(string pfad)
+        {
+            return pfad == "/api/anmelden" || pfad == "/api/abmelden" || pfad == DomaenePfad;
+        }
+
         private void Bearbeiten(HttpListenerContext ctx)
         {
             string pfad = ctx.Request.Url.AbsolutePath;
             string methode = ctx.Request.HttpMethod;
-            if (methode != "GET" && methode != "HEAD") Interlocked.Exchange(ref _letzteAenderung, DateTime.UtcNow.Ticks);
             try
             {
                 // Proxy-Port: nur Anfragen vom Connector (dessen Kopfzeilen tragen die Microsoft-365-Anmeldung)
@@ -208,7 +217,12 @@ namespace ITThemensammler
                     throw new WebFehler(403, "Dieser Port ist nur für den Anwendungsproxy.");
                 }
                 if (pfad.StartsWith("/api/", StringComparison.Ordinal))
+                {
                     Api(ctx, pfad.TrimEnd('/'));
+                    // erst nach einer erfolgreichen Änderung (abgewiesene Anfragen und An-/Abmelden zählen nicht)
+                    if (methode != "GET" && methode != "HEAD" && !KeineAenderung(pfad.TrimEnd('/')))
+                        Interlocked.Exchange(ref _letzteAenderung, DateTime.UtcNow.Ticks);
+                }
                 else
                     Datei(ctx, pfad);
             }
@@ -997,18 +1011,14 @@ namespace ITThemensammler
         /// </summary>
         private static void BildSpeichern(HttpListenerContext ctx, string id)
         {
+            Begrenzt(() => BildSpeichernIntern(ctx, id));
+        }
+
+        private static void BildSpeichernIntern(HttpListenerContext ctx, string id)
+        {
             byte[] daten = Lesen(ctx, MaxAnhang, "Das Bild ist zu groß (höchstens 10 MB).");
             if (daten.Length == 0) throw new WebFehler(400, "Kein Bild empfangen.");
-            Image bild;
-            try
-            {
-                bild = Image.FromStream(new MemoryStream(daten), false, true);
-            }
-            catch
-            {
-                throw new WebFehler(400, "Die Datei ist kein lesbares Bild. Bitte PNG oder JPG verwenden.");
-            }
-            using (bild)
+            using (Image bild = BildOeffnen(daten))
             {
                 if (bild.Width < 8 || bild.Height < 8) throw new WebFehler(400, "Das Bild ist zu klein.");
                 try
@@ -1061,35 +1071,59 @@ namespace ITThemensammler
 
         private void Anmelden(HttpListenerContext ctx)
         {
-            string ip = IpAdresse(ctx);
+            string ip = AnmeldeSchluessel(ctx);
+            Sperrzeit sp;
             lock (_fehlversuche)
             {
-                Sperrzeit sp;
-                if (_fehlversuche.TryGetValue(ip, out sp) && sp.Bis > DateTime.UtcNow)
-                    throw new WebFehler(429, "Zu viele Fehlversuche. Bitte in " + Math.Max(1, (int)Math.Ceiling((sp.Bis - DateTime.UtcNow).TotalMinutes)) + " Minuten erneut versuchen.");
+                var jetzt = DateTime.UtcNow;
+                // abgelaufene Zähler entfernen
+                foreach (var alt in _fehlversuche.Where(p => p.Value.Laufend == 0 && p.Value.Bis < jetzt && p.Value.Zuletzt < jetzt.AddMinutes(-15)).Select(p => p.Key).ToList())
+                    _fehlversuche.Remove(alt);
+                if (!_fehlversuche.TryGetValue(ip, out sp)) _fehlversuche[ip] = sp = new Sperrzeit();
+                if (sp.Bis > jetzt)
+                    throw new WebFehler(429, "Zu viele Fehlversuche. Bitte in " + Math.Max(1, (int)Math.Ceiling((sp.Bis - jetzt).TotalMinutes)) + " Minuten erneut versuchen.");
+                // Versuch vor der Kennwortprüfung reservieren: parallele Anfragen kommen nicht an der Sperre vorbei
+                if (sp.Anzahl + sp.Laufend >= MaxFehlversuche)
+                    throw new WebFehler(429, "Zu viele Anmeldeversuche gleichzeitig. Bitte kurz warten.");
+                sp.Laufend++;
+                sp.Zuletzt = jetzt;
             }
-            var b = Body(ctx);
-            string name = b.ContainsKey("name") ? b["name"] as string : null;
-            string kennwort = b.ContainsKey("kennwort") ? b["kennwort"] as string : null;
-            var konto = Speicher.Pruefen(name, kennwort);
-            if (konto == null)
+            Konto konto = null;
+            string name = null;
+            bool ok = false;
+            try
+            {
+                var b = Body(ctx);
+                name = b.ContainsKey("name") ? b["name"] as string : null;
+                string kennwort = b.ContainsKey("kennwort") ? b["kennwort"] as string : null;
+                if (!Pruefungen.Wait(10000)) throw new WebFehler(503, "Der Server ist gerade ausgelastet. Bitte gleich noch einmal versuchen.");
+                try { konto = Speicher.Pruefen(name, kennwort); }
+                finally { Pruefungen.Release(); }
+                ok = konto != null;
+            }
+            finally
             {
                 lock (_fehlversuche)
                 {
-                    Sperrzeit sp;
-                    if (!_fehlversuche.TryGetValue(ip, out sp)) _fehlversuche[ip] = sp = new Sperrzeit();
-                    sp.Anzahl++;
-                    if (sp.Anzahl >= MaxFehlversuche)
+                    sp.Laufend--;
+                    if (ok) { sp.Anzahl = 0; if (sp.Laufend == 0) _fehlversuche.Remove(ip); }
+                    else
                     {
-                        sp.Bis = DateTime.UtcNow.AddMinutes(2);
-                        sp.Anzahl = 0;
+                        sp.Anzahl++;
+                        if (sp.Anzahl >= MaxFehlversuche)
+                        {
+                            sp.Bis = DateTime.UtcNow.AddMinutes(2);
+                            sp.Anzahl = 0;
+                        }
                     }
                 }
-                Speicher.Protokoll("Anmeldung fehlgeschlagen (" + (name ?? "") + "), " + ip);
+            }
+            if (konto == null)
+            {
+                Speicher.Protokoll("Anmeldung fehlgeschlagen (" + (name ?? "") + "), " + IpAdresse(ctx));
                 Thread.Sleep(600); // bremst das Durchprobieren
                 throw new WebFehler(403, "Name oder Kennwort falsch.");
             }
-            lock (_fehlversuche) _fehlversuche.Remove(ip);
 
             string token = BitConverter.ToString(Speicher.Zufall(32)).Replace("-", "").ToLowerInvariant();
             lock (_sitzungen)
@@ -1098,7 +1132,7 @@ namespace ITThemensammler
                 _sitzungen[token] = new Sitzung { Name = konto.name, Hash = konto.hash, Ablauf = DateTime.UtcNow.AddMinutes(SitzungMinuten) };
             }
             ctx.Response.AppendHeader("Set-Cookie", CookieName + "=" + token + "; Path=/; HttpOnly; SameSite=Strict" + (ctx.Request.IsSecureConnection ? "; Secure" : ""));
-            Speicher.Protokoll("Anmeldung " + konto.name + ", " + ip);
+            Speicher.Protokoll("Anmeldung " + konto.name + ", " + IpAdresse(ctx));
             Antworten(ctx, 200, Gesamtstand(ctx, konto.name));
         }
 
@@ -1401,6 +1435,18 @@ namespace ITThemensammler
             return name;
         }
 
+        /// <summary>
+        /// Schlüssel für die Sperre nach Fehlversuchen: die IP-Adresse; über den Anwendungsproxy (alle Anfragen kommen vom
+        /// Connector) zusätzlich das vom Proxy angemeldete Microsoft-365-Konto, damit nicht alle gemeinsam gesperrt werden.
+        /// </summary>
+        private string AnmeldeSchluessel(HttpListenerContext ctx)
+        {
+            string ip = IpAdresse(ctx);
+            if (!ViaProxy(ctx) || !VomConnector(ctx)) return ip;
+            string upn = Konten.Kopf(ctx.Request, Speicher.EinstellungenLesen().proxyKopfUpn).ToLowerInvariant();
+            return upn.Length > 0 && upn.Length <= 120 ? ip + "|" + upn : ip;
+        }
+
         private static string IpAdresse(HttpListenerContext ctx)
         {
             var ep = ctx.Request.RemoteEndPoint;
@@ -1415,18 +1461,59 @@ namespace ITThemensammler
         /// </summary>
         private static void LogoSpeichern(HttpListenerContext ctx, bool dunkel)
         {
-            byte[] daten = Lesen(ctx, MaxBild, "Das Bild ist zu groß (höchstens 3 MB).");
-            if (daten.Length == 0) throw new WebFehler(400, "Kein Bild empfangen.");
+            Begrenzt(() => LogoSpeichernIntern(ctx, dunkel));
+        }
+
+        // ------------------------------------------------------------------ Bilder annehmen (Anhänge und Kundenlogo)
+
+        /// <summary>Höchstens zwei Bilder gleichzeitig dekodieren.</summary>
+        private static readonly SemaphoreSlim Dekodieren = new SemaphoreSlim(2);
+        private const int MaxKante = 12000;
+        private const long MaxPixel = 40L * 1000 * 1000;
+
+        private static void Begrenzt(Action arbeit)
+        {
+            if (!Dekodieren.Wait(15000)) throw new WebFehler(503, "Der Server ist gerade ausgelastet. Bitte gleich noch einmal versuchen.");
+            try { arbeit(); }
+            finally { Dekodieren.Release(); }
+        }
+
+        /// <summary>
+        /// Bild öffnen, ohne es schon ganz zu dekodieren, und vor dem Dekodieren Format und Abmessungen prüfen
+        /// (eine kleine Datei kann ein riesiges Bild enthalten): nur PNG, JPEG, GIF und BMP, höchstens 12.000 Pixel je Kante
+        /// und 40 Megapixel.
+        /// </summary>
+        private static Image BildOeffnen(byte[] daten)
+        {
             Image bild;
             try
             {
-                bild = Image.FromStream(new MemoryStream(daten), false, true);
+                bild = Image.FromStream(new MemoryStream(daten), false, false);
             }
             catch
             {
                 throw new WebFehler(400, "Die Datei ist kein lesbares Bild. Bitte PNG oder JPG verwenden.");
             }
-            using (bild)
+            Guid f = bild.RawFormat.Guid;
+            bool format = f == ImageFormat.Jpeg.Guid || f == ImageFormat.Png.Guid || f == ImageFormat.Gif.Guid || f == ImageFormat.Bmp.Guid;
+            if (!format)
+            {
+                bild.Dispose();
+                throw new WebFehler(400, "Dieses Bildformat wird nicht angenommen. Bitte PNG oder JPG verwenden.");
+            }
+            if (bild.Width > MaxKante || bild.Height > MaxKante || (long)bild.Width * bild.Height > MaxPixel)
+            {
+                bild.Dispose();
+                throw new WebFehler(400, "Das Bild hat zu viele Pixel (höchstens 12.000 je Seite und 40 Megapixel).");
+            }
+            return bild;
+        }
+
+        private static void LogoSpeichernIntern(HttpListenerContext ctx, bool dunkel)
+        {
+            byte[] daten = Lesen(ctx, MaxBild, "Das Bild ist zu groß (höchstens 3 MB).");
+            if (daten.Length == 0) throw new WebFehler(400, "Kein Bild empfangen.");
+            using (Image bild = BildOeffnen(daten))
             {
                 if (bild.Width < 8 || bild.Height < 8) throw new WebFehler(400, "Das Bild ist zu klein.");
                 double f = Math.Min(1.0, Math.Min(800.0 / bild.Width, 300.0 / bild.Height));

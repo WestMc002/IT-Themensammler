@@ -922,6 +922,8 @@ namespace ITThemensammler
         {
             var letzte = UpdatePruefung.Letzte;
             string last = letzte == DateTime.MinValue ? "" : "Zuletzt geprüft " + letzte.ToLocalTime().ToString("dd.MM.yyyy");
+            if (_update != null && _update.Problem != null && _autoError == null) // ohne gültige Signatur: nur die Release-Seite
+                return new UpdateStatus(UpdateKind.Available, "Version " + _update.Version + " verfügbar", _update.Problem) { More = _update.ProblemDetail };
             if (_update != null)
                 return new UpdateStatus(UpdateKind.Available, "Version " + _update.Version + " verfügbar", _autoError ?? last) { More = _autoErrorMore };
             // noch nichts Fertiges veröffentlicht: neutral melden, das ist kein Fehler
@@ -980,7 +982,8 @@ namespace ITThemensammler
                 _updateBar.Text = "Neue Version " + _update.Version + " verfügbar – installiert ist " + Ui.Version + ".";
                 string blocker = UpdateCheck.InstallBlocker();
                 _updateBar.Install.Enabled = blocker == null && !string.IsNullOrEmpty(_update.ZipUrl);
-                _tip.SetToolTip(_updateBar.Install, blocker ?? (string.IsNullOrEmpty(_update.ZipUrl) ? "Im Release ist keine ZIP-Datei angehängt." :
+                _tip.SetToolTip(_updateBar.Install, blocker ?? (_update.Problem != null ? _update.Problem + " " + _update.ProblemDetail :
+                    string.IsNullOrEmpty(_update.ZipUrl) ? "Im Release ist keine passende ZIP-Datei." :
                     "ZIP herunterladen, Verwaltungsfenster und Dienst kurz beenden, Programm und Liesmich ersetzen, alles neu starten.\r\nThemen, Einstellungen und Konten bleiben erhalten."));
                 _tip.SetToolTip(_updateBar, string.IsNullOrEmpty(_update.Notes) ? "Die Änderungen stehen auf der Release-Seite." : "Änderungen:\r\n" + _update.Notes);
             }

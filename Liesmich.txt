@@ -267,7 +267,8 @@ Updates
   prüfen"): Eine neue Version wird ohne Rückfrage installiert. Das übernimmt
   der Dienst; er wartet, bis nichts los ist (Verwaltungsfenster zu, kein
   AD-Abgleich, in den letzten 5 Minuten keine Änderung in der Weboberfläche)
-  und versucht es sonst alle 5 Minuten erneut. Der Dienst wird dabei kurz
+  und versucht es sonst alle 5 Minuten erneut. Betrieb in der Weboberfläche
+  schiebt das Update höchstens 24 Stunden auf. Der Dienst wird dabei kurz
   beendet und startet danach von selbst neu; das Ergebnis steht im
   Protokoll. Ohne laufenden Dienst aktualisiert sich das Verwaltungsfenster
   selbst und startet neu. Liegt es unter "Programme" und läuft nicht als
@@ -279,6 +280,16 @@ Updates
   und das Verwaltungsfenster neu und meldet dort das Ergebnis. Die
   Weboberfläche ist dabei einige Sekunden nicht erreichbar; Themen,
   Einstellungen und Konten bleiben erhalten.
+- Signierte Updates: Jedes Release enthält neben dem ZIP
+  "IT-Themensammler-<Version>.manifest" mit der Prüfsumme (SHA-256) des ZIP,
+  signiert mit dem Schlüssel des Herausgebers, der nicht auf GitHub liegt.
+  Installiert wird nur, wenn die Signatur gültig ist und die Prüfsumme zum
+  ZIP passt; sonst steht im Info-Fenster z. B. "Nicht signiert." bzw.
+  "Signatur ungültig." und es bleibt nur die Release-Seite. Das Update prüft
+  Signatur und Prüfsumme in einem eigenen Ordner unter %ProgramData%, auf den
+  nur SYSTEM und Administratoren schreiben dürfen, noch einmal und übernimmt
+  aus dem ZIP nur IT-Themensammler.exe und Liesmich.txt. Es läuft immer nur
+  ein Update zur Zeit.
 - Im Projektordner (mit Erstellen.bat) wird nie automatisch ersetzt.
 
 Sicherheit
@@ -308,6 +319,16 @@ aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
 der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.32  Signierte Updates (Manifest mit Signatur des Herausgebers, SHA-256-
+      Prüfung, geschützter Arbeitsordner, nur EXE und Liesmich werden
+      übernommen, nur ein Update zur Zeit); Hinweisleiste bei wenig Platz
+      zweizeilig; übernommene Daten werden geprüft (Größe, Themen-IDs);
+      Datenordner wird auch bei bestehenden Installationen auf SYSTEM und
+      Administratoren beschränkt; Anmeldesperre auch bei gleichzeitigen
+      Versuchen; Bilder mit zu vielen Pixeln werden abgewiesen; Protokoll
+      ohne eingeschleuste Zeilen; bricht ein automatisches Update vorzeitig ab,
+      steht der Grund im Protokoll und der Dienst versucht es nach einer Stunde
+      erneut
 1.24  Neuer Name „IT-Themensammler“ (ohne Namenszusatz); Info-Fenster mit
       GS-Logo, Fußzeile mit Jahr, Programmname und Website; Programm-Icon in der
       Weboberfläche (bzw. oben links das Kundenlogo); bestehende Installationen

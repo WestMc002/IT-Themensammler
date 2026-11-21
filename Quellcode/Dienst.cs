@@ -336,20 +336,20 @@ namespace ITThemensammler
         public static void FirewallSetzen(int port)
         {
             FirewallEntfernen();
-            Ausfuehren("netsh", "advfirewall firewall add rule name=\"" + FirewallRegel + "\" dir=in action=allow protocol=TCP localport=" +
+            Ausfuehren(Netsh, "advfirewall firewall add rule name=\"" + FirewallRegel + "\" dir=in action=allow protocol=TCP localport=" +
                 port.ToString(CultureInfo.InvariantCulture) + " profile=domain,private", false);
             // Zugriff von außen: Port für den Anwendungsproxy nur für die Connector-Server
             var e = Speicher.EinstellungenLesen();
             var ips = e.proxyIps.Where(x => { System.Net.IPAddress a; return System.Net.IPAddress.TryParse(x, out a); }).ToList();
             if (e.proxyAn == true && ips.Count > 0 && e.proxyPort != port)
-                Ausfuehren("netsh", "advfirewall firewall add rule name=\"" + FirewallRegelProxy + "\" dir=in action=allow protocol=TCP localport=" +
+                Ausfuehren(Netsh, "advfirewall firewall add rule name=\"" + FirewallRegelProxy + "\" dir=in action=allow protocol=TCP localport=" +
                     e.proxyPort.ToString(CultureInfo.InvariantCulture) + " remoteip=" + string.Join(",", ips.ToArray()) + " profile=domain,private", false);
         }
 
         public static void FirewallEntfernen()
         {
-            Ausfuehren("netsh", "advfirewall firewall delete rule name=\"" + FirewallRegel + "\"", true);
-            Ausfuehren("netsh", "advfirewall firewall delete rule name=\"" + FirewallRegelProxy + "\"", true);
+            Ausfuehren(Netsh, "advfirewall firewall delete rule name=\"" + FirewallRegel + "\"", true);
+            Ausfuehren(Netsh, "advfirewall firewall delete rule name=\"" + FirewallRegelProxy + "\"", true);
         }
 
         // ------------------------------------------------------------------ Hilfen
@@ -359,10 +359,13 @@ namespace ITThemensammler
         {
             try
             {
-                return Ausfuehren("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -Command \"" + befehl.Replace("\"", "\\\"") + "\"", true);
+                return Ausfuehren(UpdateCheck.PowerShellPfad, "-NoProfile -ExecutionPolicy Bypass -Command \"" + befehl.Replace("\"", "\\\"") + "\"", true);
             }
             catch { return -1; }
         }
+
+        /// <summary>Systemprogramme nur über feste Pfade (nie über den Suchpfad).</summary>
+        private static string Netsh { get { return Path.Combine(Environment.SystemDirectory, "netsh.exe"); } }
 
         private static void Sc(string argumente, bool fehlerEgal = false)
         {
