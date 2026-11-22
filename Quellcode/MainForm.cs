@@ -848,6 +848,8 @@ namespace ITThemensammler
 
         private void StartUpdateTimer()
         {
+            // Arbeitsordner abgeschlossener bzw. unveränderter Updates aufräumen (nur unter der gemeinsamen Sperre)
+            Task.Run(() => UpdateCheck.Cleanup());
             if (AfterUpdate)
             {
                 // Neustart durch das Update-Skript: Ergebnis melden

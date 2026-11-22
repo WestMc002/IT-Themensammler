@@ -319,6 +319,13 @@ aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
 der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.36  Wiederherstellung nach einem nicht abgeschlossenen Update noch
+      sicherer: Protokoll der alten Stände mit Prüfsummen und Plan, dauerhaft
+      auf den Datenträger geschrieben; vor dem Zurücksetzen wird alles geprüft
+      (auch die Rechte des Arbeitsordners), sonst bleibt es beim Hinweis;
+      Aufräumen nur, wenn gerade kein Update läuft; nie im Projektordner;
+      Fehlerprotokoll wird ab 256 KB als Fehler.alt.log aufgehoben;
+      übernommene Daten mit doppelten Themen-IDs werden abgelehnt
 1.33  Update noch robuster: Dateien werden erst nach dem Ende des Programms
       und über Hilfsdateien in einem Schritt ersetzt; scheitert etwas, werden
       die alten Dateien Datei für Datei zurückgeholt (mit Protokoll der alten

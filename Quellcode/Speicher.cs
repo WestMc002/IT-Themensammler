@@ -433,8 +433,10 @@ namespace ITThemensammler
             var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var a in neu.anfragen)
             {
-                // IDs nur im erwarteten Format und eindeutig; Bilder nur, wenn es die Datei hier gibt
-                if (!GueltigeId(a.id) || !ids.Add(a.id)) { a.id = Guid.NewGuid().ToString("N"); ids.Add(a.id); a.bild = ""; }
+                // IDs nur im erwarteten Format (sonst neue ID ohne Bild); doppelte IDs machen die Datei widersprüchlich:
+                // ablehnen, bevor irgendetwas übernommen wird. Bilder nur, wenn es die Datei hier gibt
+                if (!GueltigeId(a.id)) { a.id = Guid.NewGuid().ToString("N"); a.bild = ""; }
+                if (!ids.Add(a.id)) throw new InvalidDataException("Die Datei enthält doppelte Themen-IDs und wird nicht übernommen.");
                 if (a.bild.Length > 0 && !File.Exists(AnhangPfad(a.id))) a.bild = "";
                 a.standort = Kuerzen(a.standort, 100);
                 a.benutzer = Kuerzen(a.benutzer, 100);
@@ -693,9 +695,10 @@ namespace ITThemensammler
                 {
                     OrdnerAnlegen(); // dieselbe geschützte Anlage wie für die Daten
                     string pfad = Path.Combine(Ordner, datei);
-                    // nicht endlos wachsen lassen: ab 2 MB die alte Datei als .alt.log aufheben
+                    // nicht endlos wachsen lassen: die alte Datei als .alt.log aufheben (Fehlerprotokoll ab 256 KB, sonst ab 2 MB)
                     var fi = new FileInfo(pfad);
-                    if (fi.Exists && fi.Length > 2 * 1024 * 1024)
+                    long grenze = datei == "Fehler.log" ? 256 * 1024 : 2 * 1024 * 1024;
+                    if (fi.Exists && fi.Length >= grenze)
                     {
                         string alt = Path.ChangeExtension(pfad, ".alt.log");
                         if (File.Exists(alt)) File.Delete(alt);
