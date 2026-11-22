@@ -319,6 +319,15 @@ aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
 der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.33  Update noch robuster: Dateien werden erst nach dem Ende des Programms
+      und über Hilfsdateien in einem Schritt ersetzt; scheitert etwas, werden
+      die alten Dateien Datei für Datei zurückgeholt (mit Protokoll der alten
+      Stände); ist das nicht vollständig möglich, startet nichts neu und
+      weitere Updates warten, bis es geklärt ist: "Jetzt aktualisieren" stellt
+      dann nach Rückfrage die vorherige Version wieder her (blieb nichts
+      verändert, wird still aufgeräumt); Größengrenzen für Antwort, Download
+      und ZIP-Inhalt; Meldungen nach einem fehlgeschlagenen Update ohne Technik
+      (Einzelheiten im Fehlerprotokoll)
 1.32  Signierte Updates (Manifest mit Signatur des Herausgebers, SHA-256-
       Prüfung, geschützter Arbeitsordner, nur EXE und Liesmich werden
       übernommen, nur ein Update zur Zeit); Hinweisleiste bei wenig Platz

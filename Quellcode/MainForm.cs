@@ -859,11 +859,16 @@ namespace ITThemensammler
                     _message.ForeColor = Ui.Green;
                     Speicher.Protokoll("Update auf Version " + v + " installiert");
                 }
+                else if (result != null && result.StartsWith("ZURUECK"))
+                {
+                    Meldung("Vorherige Version wiederhergestellt.", false);
+                    Speicher.Protokoll("Nicht abgeschlossenes Update: vorherige Version wiederhergestellt");
+                }
                 else if (result != null)
                 {
-                    string why = result.Replace("FEHLER", "").Trim();
-                    Meldung("Update fehlgeschlagen: " + why + " – die bisherige Version läuft weiter.", true);
-                    Speicher.Protokoll("Update fehlgeschlagen: " + why);
+                    // Meldung ohne Technik und Pfade; Einzelheiten nur ins Fehlerprotokoll
+                    Meldung("Update nicht installiert – die bisherige Version läuft weiter. Einzelheiten stehen im Fehlerprotokoll.", true);
+                    Speicher.Fehler("Update nicht installiert: " + result, null);
                 }
             }
             _updateTimer.Tick += async (s, e) =>
@@ -981,8 +986,10 @@ namespace ITThemensammler
             {
                 _updateBar.Text = "Neue Version " + _update.Version + " verfügbar – installiert ist " + Ui.Version + ".";
                 string blocker = UpdateCheck.InstallBlocker();
-                _updateBar.Install.Enabled = blocker == null && !string.IsNullOrEmpty(_update.ZipUrl);
-                _tip.SetToolTip(_updateBar.Install, blocker ?? (_update.Problem != null ? _update.Problem + " " + _update.ProblemDetail :
+                // nicht abgeschlossenes Update: der Knopf bietet die Wiederherstellung an
+                bool offen = blocker == UpdateCheck.PendingText;
+                _updateBar.Install.Enabled = offen || (blocker == null && !string.IsNullOrEmpty(_update.ZipUrl));
+                _tip.SetToolTip(_updateBar.Install, offen ? blocker + " Ein Klick stellt die vorherige Version wieder her." : blocker ?? (_update.Problem != null ? _update.Problem + " " + _update.ProblemDetail :
                     string.IsNullOrEmpty(_update.ZipUrl) ? "Im Release ist keine passende ZIP-Datei." :
                     "ZIP herunterladen, Verwaltungsfenster und Dienst kurz beenden, Programm und Liesmich ersetzen, alles neu starten.\r\nThemen, Einstellungen und Konten bleiben erhalten."));
                 _tip.SetToolTip(_updateBar, string.IsNullOrEmpty(_update.Notes) ? "Die Änderungen stehen auf der Release-Seite." : "Änderungen:\r\n" + _update.Notes);
@@ -1012,6 +1019,12 @@ namespace ITThemensammler
         private async Task InstallUpdate(bool silent)
         {
             if (_update == null || _installing) return;
+            // nicht abgeschlossenes früheres Update: erst die vorherige Version wiederherstellen (nur von Hand, mit Rückfrage)
+            if (UpdateCheck.InstallBlocker() == UpdateCheck.PendingText)
+            {
+                if (!silent && UpdateCheck.OfferRepair(this)) Close();
+                return;
+            }
             var info = _update;
             bool dienst = DienstSteuerung.Zustand() != DienstZustand.NichtEingerichtet;
             string text = Ui.AppName + " wird auf Version " + info.Version + " aktualisiert. " +
@@ -1045,7 +1058,8 @@ namespace ITThemensammler
                 _updateBar.Text = barText;
                 _updateBar.Page.Enabled = true;
                 _updateBar.Later.Enabled = true;
-                _updateBar.Install.Enabled = UpdateCheck.InstallBlocker() == null;
+                string nachher = UpdateCheck.InstallBlocker();
+                _updateBar.Install.Enabled = nachher == null || nachher == UpdateCheck.PendingText;
                 _installing = false;
             }
         }

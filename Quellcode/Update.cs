@@ -25,6 +25,7 @@ namespace ITThemensammler
         public string ZipUrl;    // angehängtes ZIP "IT-Themensammler-<Version>.zip" (EXE und Liesmich), nur mit gültiger Signatur
         public string Sha256;    // Prüfsumme des ZIP aus dem signierten Manifest (Hex, klein)
         public byte[] Manifest;  // signiertes Manifest (das Update-Skript prüft es selbst noch einmal)
+        public long ZipSize;     // Größe des ZIP laut GitHub ("size"), 0 = unbekannt
         public string Problem;   // ohne gültige Signatur: "Nicht signiert." / "Signatur ungültig." / "Signatur nicht lesbar."
         public string ProblemDetail;
         public string Notes;     // Abschnitt "Änderungen" als Klartext (Tooltip der Hinweisleiste)
@@ -86,9 +87,10 @@ namespace ITThemensammler
             string text;
             try
             {
+                // Antwort auf 1 MB begrenzen (übliche Antworten haben wenige KB)
                 using (var resp = (HttpWebResponse)req.GetResponse())
-                using (var r = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                    text = r.ReadToEnd();
+                using (var stream = resp.GetResponseStream())
+                    text = Encoding.UTF8.GetString(ReadLimited(stream, 1024 * 1024));
             }
             catch (WebException ex)
             {
@@ -120,6 +122,7 @@ namespace ITThemensammler
             string wanted = ZipName(version), wantedManifest = ManifestName(version);
             string prefix = "https://github.com/" + Repo + "/releases/download/";
             string zipUrl = null, manifestUrl = null;
+            long zipSize = 0;
             var assets = obj.ContainsKey("assets") ? obj["assets"] as List<object> : null;
             if (assets != null)
                 foreach (object o in assets)
@@ -128,7 +131,13 @@ namespace ITThemensammler
                     if (a == null || !a.ContainsKey("name") || !a.ContainsKey("browser_download_url")) continue;
                     string name = a["name"] as string, dl = a["browser_download_url"] as string;
                     if (name == null || dl == null || !dl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (string.Equals(name, wanted, StringComparison.Ordinal)) zipUrl = dl;
+                    if (string.Equals(name, wanted, StringComparison.Ordinal))
+                    {
+                        zipUrl = dl;
+                        object size;
+                        if (a.TryGetValue("size", out size) && size != null)
+                            try { zipSize = Convert.ToInt64(size, System.Globalization.CultureInfo.InvariantCulture); } catch { }
+                    }
                     else if (string.Equals(name, wantedManifest, StringComparison.Ordinal)) manifestUrl = dl;
                 }
             if (zipUrl == null) return info; // kein passendes ZIP: nur die Release-Seite
@@ -157,6 +166,7 @@ namespace ITThemensammler
                 return info;
             }
             info.ZipUrl = zipUrl;
+            info.ZipSize = zipSize;
             info.Sha256 = sha;
             info.Manifest = manifest;
             return info;
@@ -254,6 +264,62 @@ namespace ITThemensammler
             return -1;
         }
 
+        private const long MaxZip = 64L * 1024 * 1024;
+
+        /// <summary>Stream lesen, höchstens max Bytes – sonst Abbruch.</summary>
+        private static byte[] ReadLimited(Stream stream, int max)
+        {
+            using (var ms = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192];
+                int n;
+                while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ms.Write(buffer, 0, n);
+                    if (ms.Length > max) throw new Exception("Antwort zu groß.");
+                }
+                return ms.ToArray();
+            }
+        }
+
+        /// <summary>Datei laden und beim Lesen auf max Bytes begrenzen (danach Abbruch, Datei weg).</summary>
+        private static void DownloadLimited(string url, string file, long max, Action<int> progress)
+        {
+            var request = (HttpWebRequest)WebRequest.Create(url);
+            request.UserAgent = UserAgent;
+            request.Timeout = 30000;
+            request.ReadWriteTimeout = 30000;
+            bool ok = false;
+            try
+            {
+                using (var response = (HttpWebResponse)request.GetResponse())
+                {
+                    if (response.ContentLength > max) throw new Exception("Das Update ist größer als erwartet.");
+                    long length = response.ContentLength > 0 ? response.ContentLength : max;
+                    using (var stream = response.GetResponseStream())
+                    using (var fs = new FileStream(file, FileMode.CreateNew, FileAccess.Write))
+                    {
+                        byte[] buffer = new byte[81920];
+                        long total = 0;
+                        int n, last = -1;
+                        while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            total += n;
+                            if (total > max) throw new Exception("Das Update ist größer als erwartet.");
+                            fs.Write(buffer, 0, n);
+                            int pct = (int)Math.Min(100, total * 100 / length);
+                            if (progress != null && pct != last) { last = pct; progress(pct); }
+                        }
+                    }
+                }
+                ok = true;
+            }
+            finally
+            {
+                if (!ok) try { File.Delete(file); } catch { }
+            }
+        }
+
         /// <summary>Kleine Datei laden (höchstens max Bytes).</summary>
         private static byte[] DownloadSmall(string url, int max)
         {
@@ -294,7 +360,151 @@ namespace ITThemensammler
         {
             if (File.Exists(Path.Combine(Application.StartupPath, "Erstellen.bat")))
                 return "Im Projektordner (mit Erstellen.bat) wird nicht automatisch aktualisiert – dort entsteht die EXE beim Erstellen.";
+            bool dienst;
+            if (PendingRestore(TargetId(ZielExe(out dienst))) != null) return PendingText;
             return null;
+        }
+
+        /// <summary>Programmdatei, die ersetzt wird: die des eingerichteten Dienstes, sonst die laufende EXE.</summary>
+        private static string ZielExe(out bool dienst)
+        {
+            // (nach einem Update aus der Zeit vor der Umbenennung kurz noch im alten Programmordner)
+            string dienstExe = DienstSteuerung.DienstPfad() ?? DienstSteuerung.ProgrammPfad;
+            dienst = DienstSteuerung.Zustand() != DienstZustand.NichtEingerichtet && File.Exists(dienstExe);
+            return dienst ? dienstExe : Application.ExecutablePath;
+        }
+
+        /// <summary>Kennung des Installationsziels (24 Zeichen der SHA-256 des Programmordners) für Arbeitsordner und Merker.</summary>
+        internal static string TargetId(string exe)
+        {
+            string dir = Path.GetFullPath(Path.GetDirectoryName(exe)).TrimEnd('\\').ToUpperInvariant();
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dir))).Replace("-", "").Substring(0, 24);
+        }
+
+        /// <summary>Merker im Arbeitsordner: Rücksicherung unvollständig, Inhalt = Ordner mit den alten Dateien.</summary>
+        private const string PendingMarker = "Wiederherstellung-offen";
+
+        /// <summary>Kurzmeldung für Anwender: Ein Update wurde nicht abgeschlossen (Technisches steht im Protokoll).</summary>
+        public const string PendingText = "Das letzte Update wurde nicht abgeschlossen.";
+
+        /// <summary>
+        /// Arbeitsordner eines nicht abgeschlossenen Updates für dieses Ziel (null = keiner). Ordner, bei denen laut Journal
+        /// nichts zurückzusetzen ist (alle Ziele gleich der Sicherung bzw. nicht vorhanden), werden still aufgeräumt.
+        /// Alle Arbeitsordner liegen hier geschützt (Datenordner bzw. direkt unter ProgramData, nur Administratoren/SYSTEM).
+        /// </summary>
+        private static string PendingRestore(string targetId)
+        {
+            try
+            {
+                var dirs = new List<string>();
+                if (Directory.Exists(Folder)) dirs.AddRange(Directory.GetDirectories(Folder, targetId + "-*"));
+                string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                dirs.AddRange(Directory.GetDirectories(data, "IT-Themensammler-Update-" + targetId + "-*"));
+                foreach (string dir in dirs)
+                {
+                    if (!File.Exists(Path.Combine(dir, PendingMarker))) continue;
+                    if (NothingToRestore(dir))
+                    {
+                        try
+                        {
+                            Directory.Delete(dir, true);
+                            Speicher.Protokoll("Nicht abgeschlossenes Update aufgeräumt, es war nichts zurückzusetzen: " + dir);
+                            continue;
+                        }
+                        catch { }
+                    }
+                    return dir;
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// Prüft das Wiederherstellungsjournal: true, wenn jede eingetragene Datei noch der Sicherung entspricht bzw. bei
+        /// "Neu" nicht vorhanden ist (das Update hat dann nichts verändert). Übrig gebliebene Hilfsdateien werden entfernt.
+        /// </summary>
+        private static bool NothingToRestore(string dir)
+        {
+            try
+            {
+                bool dienst;
+                string exe = ZielExe(out dienst);
+                string target = Path.GetDirectoryName(exe);
+                string journal = Path.Combine(dir, "Wiederherstellung.txt");
+                // Journal fehlt: Der Merker wird vor dem Journal geschrieben, verändert wurde also noch nichts
+                if (!File.Exists(journal)) return true;
+                foreach (string line in File.ReadAllLines(journal, Encoding.UTF8))
+                {
+                    if (!line.StartsWith("Vorher ", StringComparison.Ordinal)) continue;
+                    var m = System.Text.RegularExpressions.Regex.Match(line,
+                        @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$");
+                    if (!m.Success) return false;
+                    string dst = m.Groups[3].Value, tmp = m.Groups[4].Value;
+                    if (!string.Equals(dst, exe, StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(dst, Path.Combine(target, ManualName), StringComparison.OrdinalIgnoreCase)) return false;
+                    if (m.Groups[2].Value == "Sicherung")
+                    {
+                        string bak = Path.Combine(Path.Combine(dir, "Alt"), m.Groups[1].Value);
+                        if (!File.Exists(bak) || !File.Exists(dst) || Sha256(bak) != Sha256(dst)) return false;
+                    }
+                    else if (File.Exists(dst)) return false;
+                    // Hilfsdatei nur im Programmordner und mit dem erwarteten Namen entfernen
+                    if (string.Equals(Path.GetDirectoryName(tmp), target, StringComparison.OrdinalIgnoreCase) &&
+                        Path.GetFileName(tmp).StartsWith("." + Path.GetFileName(dst) + ".update-", StringComparison.OrdinalIgnoreCase))
+                        try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                }
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Nicht abgeschlossenes Update: nachfragen und die vorherige Version wiederherstellen (Verwaltungsfenster und
+        /// Dienst werden dazu beendet und danach neu gestartet). true = Wiederherstellung läuft, das Fenster soll sich schließen.
+        /// </summary>
+        public static bool OfferRepair(IWin32Window owner)
+        {
+            bool dienst;
+            string exe = ZielExe(out dienst);
+            string dir = PendingRestore(TargetId(exe));
+            if (dir == null) return false;
+            Speicher.Protokoll("Nicht abgeschlossenes Update gefunden: " + dir);
+            if (MessageBox.Show(owner,
+                PendingText + "\r\n\r\n" + Ui.AppName + " stellt jetzt die vorherige Version wieder her und startet danach neu.\r\n\r\nJetzt wiederherstellen?",
+                Ui.AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return false;
+            try
+            {
+                string data = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                // nur aus dem eigenen, geschützten Arbeitsordner direkt unter ProgramData
+                if (!string.Equals(Path.GetDirectoryName(dir), data, StringComparison.OrdinalIgnoreCase))
+                    throw new Exception("Die vorherige Version lässt sich nicht automatisch wiederherstellen. Bitte " + Ui.AppName + " neu herunterladen.");
+                try { File.Delete(LogFile); } catch { }
+                var vars = new StringBuilder();
+                vars.Append("$ProcessId = ").Append(Process.GetCurrentProcess().Id).Append("\n");
+                Var(vars, "Work", dir);
+                Var(vars, "Exe", exe);
+                Var(vars, "ManualName", ManualName);
+                Var(vars, "TargetId", TargetId(exe));
+                Var(vars, "Log", LogFile);
+                Var(vars, "Service", dienst ? Dienst.DienstName : "");
+                var start = PowerShell(vars + RepairScript);
+                if (!CanWrite(Path.GetDirectoryName(exe))) start.Verb = "runas";
+                try { Process.Start(start); }
+                catch (System.ComponentModel.Win32Exception ex)
+                {
+                    if (ex.NativeErrorCode == 1223) throw new Exception("Wiederherstellung abgebrochen (Administratorrechte nicht erteilt).");
+                    throw;
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Speicher.Fehler("Wiederherstellung nicht gestartet", ex);
+                MessageBox.Show(owner, ex.Message, Ui.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
         }
 
         private static bool CanWrite(string dir)
@@ -324,8 +534,10 @@ namespace ITThemensammler
         /// <summary>
         /// ausDienst: vom Dienst selbst (automatisches Update) – das Skript beendet und startet nur den Dienst.
         /// Ablauf nach den globalen Vorgaben (signierte Updates): ZIP in einen eigenen Ordner je Versuch laden, SHA-256 aus dem
-        /// signierten Manifest prüfen, Skript per -EncodedCommand starten (keine Skriptdatei). Das Skript prüft Signatur und
-        /// SHA-256 in einem eigenen geschützten Arbeitsordner erneut und übernimmt nur IT-Themensammler.exe und Liesmich.txt.
+        /// signierten Manifest prüfen (Download begrenzt auf die Größe laut GitHub, höchstens 64 MB), Skript als Datei in den
+        /// Versuchsordner legen und über den Lader per -EncodedCommand starten (der Lader prüft die SHA-256 des Skripts).
+        /// Das Skript prüft Signatur und SHA-256 in einem eigenen geschützten Arbeitsordner erneut und übernimmt nur
+        /// IT-Themensammler.exe und Liesmich.txt.
         /// Rückgabe: der Prozess des Skripts (der Dienst überwacht ihn).
         /// </summary>
         public static async Task<Process> Install(UpdateInfo release, Action<int> progress, bool ausDienst)
@@ -350,15 +562,25 @@ namespace ITThemensammler
                 PrepareTls();
                 FolderAnlegen();
                 CleanOldAttempts();
-                // eigener Ordner je Versuch (im geschützten Datenordner): Download und Manifest
-                string attempt = Path.Combine(Folder, Guid.NewGuid().ToString("N"));
+                bool dienst;
+                string exe = ZielExe(out dienst);
+                string target = TargetId(exe);
+                // eigener Ordner je Versuch (im geschützten Datenordner), Name beginnt mit der Zielkennung
+                string attempt = Path.Combine(Folder, target + "-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(attempt);
                 string zip = Path.Combine(attempt, ZipName(release.Version));
-                using (var client = new WebClient())
+                // Download begrenzen: höchstens die von GitHub genannte Größe, in jedem Fall höchstens 64 MB
+                long limit = MaxZip;
+                if (release.ZipSize > 0)
                 {
-                    client.Headers[HttpRequestHeader.UserAgent] = UserAgent;
-                    if (progress != null) client.DownloadProgressChanged += (s, e) => progress(e.ProgressPercentage);
-                    await client.DownloadFileTaskAsync(new Uri(release.ZipUrl), zip);
+                    if (release.ZipSize > MaxZip) throw new Exception("Das Update ist ungewöhnlich groß und wird nicht geladen.");
+                    limit = release.ZipSize;
+                }
+                await Task.Run(() => DownloadLimited(release.ZipUrl, zip, limit, progress));
+                if (release.ZipSize > 0 && new FileInfo(zip).Length != release.ZipSize)
+                {
+                    try { Directory.Delete(attempt, true); } catch { }
+                    throw new Exception("Download unvollständig.");
                 }
                 string hash = Sha256(zip);
                 if (hash != release.Sha256)
@@ -372,32 +594,40 @@ namespace ITThemensammler
                 string manifest = Path.Combine(attempt, ManifestName(release.Version));
                 File.WriteAllBytes(manifest, release.Manifest);
                 try { File.Delete(LogFile); } catch { }
-                // Eingerichteter Dienst: dessen Programmdatei ersetzen (Dienst wird dafür kurz beendet), sonst die laufende EXE
-                string dienstExe = DienstSteuerung.DienstPfad() ?? DienstSteuerung.ProgrammPfad;
-                bool dienst = DienstSteuerung.Zustand() != DienstZustand.NichtEingerichtet && File.Exists(dienstExe);
-                string exe = dienst ? dienstExe : Application.ExecutablePath;
                 // Arbeitsordner des Skripts: direkt unter ProgramData, nicht vorhersagbar, vom Skript geschützt angelegt
                 string work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    "IT-Themensammler-Update-" + Guid.NewGuid().ToString("N"));
+                    "IT-Themensammler-Update-" + target + "-" + Guid.NewGuid().ToString("N"));
                 var vars = new StringBuilder();
                 vars.Append("$ProcessId = ").Append(ausDienst ? 0 : Process.GetCurrentProcess().Id).Append("\n");
                 Var(vars, "Zip", zip);
+                vars.Append("$ZipSize = ").Append(new FileInfo(zip).Length).Append("\n");
                 Var(vars, "Manifest", manifest);
                 Var(vars, "Attempt", attempt);
                 Var(vars, "Exe", exe);
                 Var(vars, "Version", release.Version);
-                Var(vars, "Sha256", release.Sha256);
+                Var(vars, "Sha256", release.Sha256.ToUpperInvariant());
                 Var(vars, "AssetName", ZipName(release.Version));
                 Var(vars, "MainKey", MainKey);
                 Var(vars, "ReserveKey", ReserveKey);
                 Var(vars, "LockName", LockName);
+                Var(vars, "TargetId", target);
+                Var(vars, "TempRoot", Folder);
                 Var(vars, "Log", LogFile);
                 Var(vars, "Work", work);
                 Var(vars, "Service", dienst ? Dienst.DienstName : "");
                 Var(vars, "ExeName", ExeName);
                 Var(vars, "ManualName", ManualName);
                 vars.Append("$NoStart = $").Append(ausDienst ? "true" : "false").Append("\n");
-                var start = PowerShell(vars + Script);
+                // Skript als Datei im (geschützten) Versuchsordner, auf der Befehlszeile nur Lader, Werte und SHA-256 des
+                // Skripts: Der Lader liest die Datei einmal in den Speicher, prüft die Prüfsumme und führt genau diese Bytes aus.
+                byte[] body = new UTF8Encoding(false).GetBytes(Compact(Script));
+                string scriptFile = Path.Combine(attempt, "Update-Skript.txt");
+                File.WriteAllBytes(scriptFile, body);
+                string scriptHash;
+                using (var sha = System.Security.Cryptography.SHA256.Create()) scriptHash = BitConverter.ToString(sha.ComputeHash(body)).Replace("-", "");
+                Var(vars, "ScriptFile", scriptFile);
+                Var(vars, "ScriptHash", scriptHash);
+                var start = PowerShell(vars + Loader);
                 // Programmordner ohne Schreibrechte: Skript mit Administratorrechten starten
                 // (das Verwaltungsfenster läuft ohnehin als Administrator, der Dienst als SYSTEM)
                 if (!ausDienst && !CanWrite(Path.GetDirectoryName(exe))) start.Verb = "runas";
@@ -454,6 +684,7 @@ namespace ITThemensammler
                 {
                     var di = new DirectoryInfo(dir);
                     if ((di.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if (File.Exists(Path.Combine(dir, PendingMarker))) continue; // Wiederherstellung offen: nie automatisch löschen
                     if (di.LastWriteTimeUtc < DateTime.UtcNow.AddDays(-1)) try { di.Delete(true); } catch { }
                 }
             }
@@ -473,21 +704,13 @@ namespace ITThemensammler
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"); }
         }
 
-        /// <summary>PowerShell mit dem Skript als Kommando (-EncodedCommand): Es liegt nirgends als Datei, die man austauschen könnte.</summary>
+        /// <summary>PowerShell mit dem Lader als Kommando (-EncodedCommand), nur über den festen Systempfad.</summary>
         private static ProcessStartInfo PowerShell(string script)
         {
             string ps = PowerShellPfad;
             if (!File.Exists(ps)) throw new Exception("Windows PowerShell wurde nicht gefunden.");
-            // Kommentarzeilen und Einrückung weglassen: Die Befehlszeile darf höchstens 32767 Zeichen lang sein
-            var compact = new StringBuilder();
-            foreach (string raw in script.Split('\n'))
-            {
-                string line = raw.Trim();
-                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
-                compact.Append(line).Append('\n');
-            }
             string arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand " +
-                               Convert.ToBase64String(Encoding.Unicode.GetBytes(compact.ToString()));
+                               Convert.ToBase64String(Encoding.Unicode.GetBytes(Compact(script)));
             if (arguments.Length > 32000) throw new Exception("Das Update-Skript ist zu lang.");
             return new ProcessStartInfo(ps, arguments)
             {
@@ -495,6 +718,19 @@ namespace ITThemensammler
                 WindowStyle = ProcessWindowStyle.Hidden,
                 WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System)
             };
+        }
+
+        /// <summary>Kommentarzeilen und Einrückung weglassen.</summary>
+        internal static string Compact(string script)
+        {
+            var compact = new StringBuilder();
+            foreach (string raw in script.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                compact.Append(line).Append('\n');
+            }
+            return compact.ToString();
         }
 
         /// <summary>Variable für das Skript als PowerShell-Text in einfachen Anführungszeichen.</summary>
@@ -523,41 +759,19 @@ namespace ITThemensammler
             catch { return null; }
         }
 
-        // Update-Skript (läuft als Administrator bzw. SYSTEM). Davor setzt das Programm: $ProcessId, $Zip, $Manifest, $Attempt,
-        // $Exe, $Version, $Sha256, $AssetName, $MainKey, $ReserveKey, $LockName, $Log, $Work, $Service, $ExeName, $ManualName, $NoStart.
-        // Dem Download-Ordner wird nicht vertraut: eigener Arbeitsordner direkt unter ProgramData (Besitzer Administratoren,
-        // schreiben nur SYSTEM und Administratoren), dort Signatur und SHA-256 prüfen und entpacken. Übernommen werden nur
-        // IT-Themensammler.exe (Pflicht) und Liesmich.txt. Nur ASCII-Anführungszeichen verwenden.
-        private const string Script = @"
+        // Lader für das Update-Skript (steht mit den Werten auf der Befehlszeile). Liest $ScriptFile einmal in den Speicher
+        // (höchstens 256 KB), prüft die SHA-256 gegen $ScriptHash und führt genau diese Bytes aus. Weicht sie ab oder fehlt
+        // die Datei, wird nichts verändert ("FEHLER Update-Skript nicht geladen …"); nach einem Update von Hand startet das
+        // Verwaltungsfenster wieder. New-WorkFolder nutzt auch das Update-Skript.
+        private const string Loader = @"
 $ErrorActionPreference = 'Stop'
-$target = Split-Path $Exe -Parent
-$workReady = $false
-$stopped = $false
-$result = $null
-$lock = $null
-$haveLock = $false
-try {
-  # nur ein Update zur Zeit (Sperre bis zum Ende dieses Skripts)
-  $lock = New-Object System.Threading.Mutex($false, $LockName)
-  try { $haveLock = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $haveLock = $true }
-  if (-not $haveLock) { throw 'Ein anderes Update laeuft gerade.' }
-  if ($ProcessId -gt 0) { for ($i = 0; $i -lt 120 -and (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 } }
-  Start-Sleep -Milliseconds 500
+# geschuetzten Arbeitsordner anlegen: Besitzer Administratoren, schreiben nur SYSTEM und Administratoren, lesen angemeldete Benutzer
+function New-WorkFolder {
   $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
   $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
   $users = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-11')
   $root = [Environment]::GetFolderPath('CommonApplicationData')
-  if ((Split-Path $Work -Parent) -ne $root) { throw 'Unerwarteter Arbeitsordner.' }
-  # alte Arbeitsordner frueherer Updates entfernen: nur eigene (Besitzer Administratoren bzw. SYSTEM), keine Verknuepfungen
-  Get-ChildItem -LiteralPath $root -Directory -Filter 'IT-Themensammler-Update-*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
-    try {
-      if (-not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
-        $o = (Get-Acl -LiteralPath $_.FullName).GetOwner([System.Security.Principal.SecurityIdentifier])
-        if ($o -eq $admins -or $o -eq $system) { [System.IO.Directory]::Delete($_.FullName, $true) }
-      }
-    } catch {}
-  }
-  # Arbeitsordner gleich mit Rechten anlegen: schreiben nur SYSTEM und Administratoren, lesen angemeldete Benutzer
+  if ((Split-Path $Work -Parent) -ne $root -or (Split-Path $Work -Leaf) -notlike ('IT-Themensammler-Update-' + $TargetId + '-*')) { throw 'Unerwarteter Arbeitsordner.' }
   $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
   $none = [System.Security.AccessControl.PropagationFlags]::None
   $sec = New-Object System.Security.AccessControl.DirectorySecurity
@@ -572,14 +786,134 @@ try {
   $o = (Get-Acl -LiteralPath $Work).GetOwner([System.Security.Principal.SecurityIdentifier])
   if (-not ($o -eq $admins -or $o -eq $system)) { throw 'Der Arbeitsordner fuer das Update ist nicht geschuetzt.' }
   if ((Get-Item -LiteralPath $Work -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Der Arbeitsordner fuer das Update ist umgeleitet.' }
+}
+$code = $null
+try {
+  # hoechstens 256 KB lesen; waehrend des Lesens darf niemand schreiben (FileShare.Read)
+  $fs = [System.IO.File]::Open($ScriptFile, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  try {
+    if ($fs.Length -gt 262144) { throw 'Das Update-Skript ist zu gross.' }
+    $b = New-Object byte[] ([int]$fs.Length)
+    $n = 0
+    while ($n -lt $b.Length) { $k = $fs.Read($b, $n, $b.Length - $n); if ($k -le 0) { break }; $n += $k }
+    if ($n -ne $b.Length) { throw 'Das Update-Skript ist unvollstaendig.' }
+  } finally { $fs.Dispose() }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $h = [System.BitConverter]::ToString($sha.ComputeHash($b)).Replace('-', '')
+  $sha.Dispose()
+  if ($h -cne $ScriptHash) { throw 'Das Update-Skript wurde veraendert.' }
+  $code = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($b)
+} catch {
+  # eindeutiger Status: Skript nicht geladen, nichts veraendert (FEHLER = bisherige Version darf wieder starten)
+  $msg = 'FEHLER Update-Skript nicht geladen, nichts veraendert: ' + $_.Exception.Message
+  try { $msg | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
+  if (-not $NoStart) {
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+    if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+      try { ($msg + ' IT-Themensammler wurde nicht neu gestartet, weil die alte Instanz noch laeuft.') | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
+    } else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
+  }
+  exit 1
+}
+. ([scriptblock]::Create($code))
+";
+
+        // Update-Skript (läuft als Administrator bzw. SYSTEM). Davor setzt das Programm: $ProcessId, $Zip, $ZipSize, $Manifest,
+        // $Attempt, $Exe, $Version, $Sha256, $AssetName, $MainKey, $ReserveKey, $LockName, $TargetId, $TempRoot, $Log, $Work,
+        // $Service, $ExeName, $ManualName, $NoStart (über den Lader zusätzlich $ScriptFile, $ScriptHash).
+        // Ablauf nach den globalen Vorgaben (Selbst-Update, Schritte 2–6): Sperre, Ende des Verwaltungsfensters abwarten,
+        // geschützter Arbeitsordner direkt unter ProgramData, ZIP und Manifest begrenzt hineinkopieren, Signatur und SHA-256
+        // dort prüfen, nur IT-Themensammler.exe und Liesmich.txt direkt aus dem Archiv über Hilfsdateien atomar ersetzen,
+        // Merker "Wiederherstellung-offen" und Journal, Rücksicherung je Datei. Abschluss "OK", "FEHLER" oder "OFFEN";
+        // Dienst bzw. Verwaltungsfenster starten nur bei OK oder FEHLER. Nur ASCII-Anführungszeichen verwenden.
+        private const string Script = @"
+$ErrorActionPreference = 'Stop'
+# Dateien begrenzt lesen bzw. kopieren; waehrenddessen darf niemand schreiben (FileShare.Read). Bei Ueberschreitung Abbruch, Teilkopie weg.
+function Read-Limited([string]$path, [long]$max) {
+  $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  try {
+    if ($fs.Length -gt $max) { throw ('Die Datei ist zu gross: ' + $path) }
+    $buf = New-Object byte[] ([int]$fs.Length)
+    $n = 0
+    while ($n -lt $buf.Length) { $k = $fs.Read($buf, $n, $buf.Length - $n); if ($k -le 0) { break }; $n += $k }
+    if ($n -ne $buf.Length) { throw ('Die Datei ist unvollstaendig: ' + $path) }
+    return ,$buf
+  } finally { $fs.Dispose() }
+}
+function Copy-Limited([string]$src, [string]$dst, [long]$max) {
+  $in = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  $out = $null
+  try {
+    if ($in.Length -gt $max) { throw ('Die Datei ist zu gross: ' + $src) }
+    $out = [System.IO.File]::Open($dst, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    $buf = New-Object byte[] 65536
+    $total = 0
+    while (($k = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+      $total += $k
+      if ($total -gt $max) { throw ('Die Datei ist zu gross: ' + $src) }
+      $out.Write($buf, 0, $k)
+    }
+    $out.Dispose()
+    $out = $null
+  } catch {
+    if ($out) { $out.Dispose(); $out = $null; Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue }
+    throw
+  } finally {
+    if ($out) { $out.Dispose() }
+    $in.Dispose()
+  }
+}
+$zipMax = [Math]::Min([long]$ZipSize, [long]67108864)
+$target = Split-Path $Exe -Parent
+$workReady = $false
+$result = $null
+$lock = $null
+$haveLock = $false
+$noRestart = $false
+$stopped = $false
+$archive = $null
+$zipStream = $null
+try {
+  # nur ein Update zur Zeit (Sperre bis zum Ende dieses Skripts)
+  $lock = New-Object System.Threading.Mutex($false, $LockName)
+  try { $haveLock = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $haveLock = $true }
+  if (-not $haveLock) { throw 'Ein anderes Update laeuft gerade.' }
+  # erst nach bestaetigtem Ende des Verwaltungsfensters Dateien aendern
+  $deadline = (Get-Date).AddSeconds(60)
+  while ($ProcessId -gt 0 -and (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) {
+    if ((Get-Date) -gt $deadline) { throw 'IT-Themensammler wurde nicht beendet.' }
+    Start-Sleep -Milliseconds 250
+  }
+  Start-Sleep -Milliseconds 500
+  $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+  $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+  $root = [Environment]::GetFolderPath('CommonApplicationData')
+  if ((Split-Path $Work -Parent) -ne $root -or (Split-Path $Work -Leaf) -notlike ('IT-Themensammler-Update-' + $TargetId + '-*')) { throw 'Unerwarteter Arbeitsordner.' }
+  # alte Arbeitsordner frueherer Updates entfernen: nur eigene (Besitzer Administratoren/SYSTEM), keine Verknuepfungen, keine mit
+  # offener Wiederherstellung; gleiches Ziel sofort (die Sperre halten wir), sonst erst nach einer Stunde ohne Aenderung
+  Get-ChildItem -LiteralPath $root -Directory -Filter 'IT-Themensammler-Update-*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+    try {
+      if (-not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        $o = (Get-Acl -LiteralPath $_.FullName).GetOwner([System.Security.Principal.SecurityIdentifier])
+        if ($o -eq $admins -or $o -eq $system) {
+          if ($_.Name -match '^IT-Themensammler-Update-([0-9A-F]{24})-[0-9a-f]{32}$' -and $Matches[1] -ceq $TargetId) { $inactive = $true }
+          else { $inactive = $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddHours(-1) }
+          if (Test-Path -LiteralPath (Join-Path $_.FullName 'Wiederherstellung-offen')) { $inactive = $false }
+          if ($inactive) { [System.IO.Directory]::Delete($_.FullName, $true) }
+        }
+      }
+    } catch {}
+  }
+  # Arbeitsordner gleich mit Rechten anlegen (New-WorkFolder steht im Lader)
+  New-WorkFolder
   $workReady = $true
   $zipWork = Join-Path $Work 'Update.zip'
   $manifestWork = Join-Path $Work 'Update.manifest'
-  Copy-Item -LiteralPath $Zip -Destination $zipWork -Force
-  Copy-Item -LiteralPath $Manifest -Destination $manifestWork -Force
+  Copy-Limited $Zip $zipWork $zipMax
+  Copy-Limited $Manifest $manifestWork 8192
   # Signatur des Manifests selbst pruefen (an der Kopie, die verwendet wird)
-  $bytes = [System.IO.File]::ReadAllBytes($manifestWork)
-  if ($bytes.Length -gt 8192) { throw 'Das Manifest ist zu gross.' }
+  $bytes = Read-Limited $manifestWork 8192
   $marker = [System.Text.Encoding]::ASCII.GetBytes([string][char]10 + 'Signatur=')
   $at = -1
   for ($i = 0; $i -le $bytes.Length - $marker.Length -and $at -lt 0; $i++) {
@@ -612,55 +946,262 @@ try {
   if (-not $valid) { throw 'Die Signatur des Updates ist ungueltig.' }
   if ($mv['Programm'] -cne 'IT-Themensammler' -or $mv['Version'] -cne $Version -or $mv['Datei'] -cne $AssetName) { throw 'Das Manifest passt nicht zu diesem Update.' }
   if ($mv['SHA256'] -cnotmatch '^[0-9a-f]{64}$') { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
-  $expected = $mv['SHA256']
-  if ($expected -cne $Sha256) { throw 'Die Pruefsumme im Manifest weicht von der Pruefung im Programm ab.' }
-  # Pruefsumme aus dem geprueften Manifest an der Datei pruefen, die tatsaechlich entpackt wird
-  $hash = (Get-FileHash -LiteralPath $zipWork -Algorithm SHA256).Hash.ToLowerInvariant()
-  if ($hash -cne $expected) { throw ('Die Pruefsumme des Updates stimmt nicht (erwartet ' + $expected + ', erhalten ' + $hash + ').') }
-  $dir = Join-Path $Work 'Neu'
-  Expand-Archive -LiteralPath $zipWork -DestinationPath $dir -Force
-  # nur bekannte Dateien uebernehmen
-  $new = Join-Path $dir $ExeName
-  if (-not (Test-Path -LiteralPath $new -PathType Leaf)) { throw ('Im ZIP fehlt ' + $ExeName) }
-  $pairs = @(,@($new, $Exe))
-  $manual = Join-Path $dir $ManualName
-  if (Test-Path -LiteralPath $manual -PathType Leaf) { $pairs += ,@($manual, (Join-Path $target $ManualName)) }
+  $expected = $mv['SHA256'].ToUpperInvariant()
+  if ($expected -ne $Sha256) { throw 'Die Pruefsumme im Manifest weicht von der Pruefung im Programm ab.' }
+  # ZIP einmal oeffnen, Pruefsumme ueber genau diesen Stream berechnen und denselben Stream entpacken
+  $zipStream = [System.IO.File]::Open($zipWork, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  if ($zipStream.Length -gt $zipMax) { throw 'Das Update ist zu gross.' }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $hash = [System.BitConverter]::ToString($sha.ComputeHash($zipStream)).Replace('-', '')
+  $sha.Dispose()
+  if ($hash -ne $expected) { throw ('Die Pruefsumme des Updates stimmt nicht (erwartet ' + $expected + ', erhalten ' + $hash + ').') }
+  $zipStream.Position = 0
+  Add-Type -AssemblyName System.IO.Compression
+  $archive = New-Object System.IO.Compression.ZipArchive($zipStream, [System.IO.Compression.ZipArchiveMode]::Read, $true)
+  # nur bekannte Eintraege (feste Namen im Stammordner), je Datei begrenzt
+  function Find-Entry([string]$name, [long]$max) {
+    $hits = @($archive.Entries | Where-Object { $_.FullName -eq $name })
+    if ($hits.Count -gt 1) { throw ('Im ZIP steht ' + $name + ' mehrfach.') }
+    if ($hits.Count -eq 0) { return $null }
+    if ($hits[0].Length -gt $max) { throw ('Im ZIP ist ' + $name + ' zu gross.') }
+    return $hits[0]
+  }
+  # erst vollstaendig in eine Hilfsdatei im Zielordner schreiben, auf den Datentraeger bringen und pruefen, dann das Ziel in einem Schritt ersetzen
+  function Write-Entry($entry, [string]$dst, [string]$tmp, [long]$max) {
+    try {
+      $in = $entry.Open()
+      try {
+        $out = [System.IO.File]::Open($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+          $buf = New-Object byte[] 65536
+          $total = 0
+          while (($k = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+            $total += $k
+            if ($total -gt $max) { throw ('Im ZIP ist ' + $entry.FullName + ' zu gross.') }
+            $out.Write($buf, 0, $k)
+          }
+          $out.Flush($true)
+        } finally { $out.Dispose() }
+      } finally { $in.Dispose() }
+      if ($total -ne $entry.Length) { throw ('Im ZIP ist ' + $entry.FullName + ' unvollstaendig.') }
+      # [NullString]::Value statt $null: PowerShell macht aus $null sonst einen leeren Text (ungueltiger Pfad)
+      if (Test-Path -LiteralPath $dst) { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }
+      else { [System.IO.File]::Move($tmp, $dst) }
+    } catch {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  # Ruecksicherung ebenso ueber eine Hilfsdatei im Zielordner
+  function Restore-File([string]$src, [string]$dst) {
+    $tmp = Join-Path (Split-Path $dst -Parent) ('.' + (Split-Path $dst -Leaf) + '.zurueck-' + [Guid]::NewGuid().ToString('N'))
+    try {
+      $in = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+      try {
+        $out = [System.IO.File]::Open($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try { $in.CopyTo($out); $out.Flush($true) } finally { $out.Dispose() }
+        if ((Get-Item -LiteralPath $tmp).Length -ne $in.Length) { throw ('Ruecksicherung von ' + $dst + ' unvollstaendig.') }
+      } finally { $in.Dispose() }
+      # [NullString]::Value statt $null: PowerShell macht aus $null sonst einen leeren Text (ungueltiger Pfad)
+      if (Test-Path -LiteralPath $dst) { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }
+      else { [System.IO.File]::Move($tmp, $dst) }
+    } catch {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  $exeEntry = Find-Entry $ExeName 33554432
+  if (-not $exeEntry) { throw ('Im ZIP fehlt ' + $ExeName) }
+  $pairs = @(,@($exeEntry, $Exe, 33554432))
+  $manualEntry = Find-Entry $ManualName 1048576
+  if ($manualEntry) { $pairs += ,@($manualEntry, (Join-Path $target $ManualName), 1048576) }
+  # unter der Sperre erneut nach offenen Wiederherstellungen fuer dieses Ziel suchen; Treffer oder fehlgeschlagene Pruefung = nichts austauschen
+  $open = $null
+  try {
+    $roots = @(@($TempRoot, ($TargetId + '-*')), @($root, ('IT-Themensammler-Update-' + $TargetId + '-*')))
+    foreach ($r in $roots) {
+      if (Test-Path -LiteralPath $r[0]) {
+        foreach ($d in @(Get-ChildItem -LiteralPath $r[0] -Directory -Filter $r[1] -Force -ErrorAction Stop)) {
+          if ($d.FullName -ne $Work -and (Test-Path -LiteralPath (Join-Path $d.FullName 'Wiederherstellung-offen'))) { $open = $d.FullName }
+        }
+      }
+    }
+  } catch { throw ('Offene Wiederherstellungen konnten nicht geprueft werden: ' + $_.Exception.Message) }
+  if ($open) { throw ('Eine fruehere Wiederherstellung ist noch offen (' + $open + ').') }
+  # Dienst beenden und auf das Ende der Programmdatei warten (hoechstens 60 s), erst dann Dateien aendern
   if ($Service) {
     $svc = Get-Service -Name $Service -ErrorAction SilentlyContinue
     if ($svc -and $svc.Status -ne 'Stopped') { Stop-Service -Name $Service -Force; $stopped = $true }
-    for ($i = 0; $i -lt 20; $i++) { if (-not (Get-Process | Where-Object { $_.Path -eq $Exe })) { break }; Start-Sleep -Milliseconds 500 }
+    $deadline = (Get-Date).AddSeconds(60)
+    while (Get-Process | Where-Object { $_.Path -eq $Exe }) {
+      if ((Get-Date) -gt $deadline) { throw 'Der Dienst wurde nicht beendet.' }
+      Start-Sleep -Milliseconds 250
+    }
   }
   # Rueckfallkopien im eigenen Arbeitsordner, nicht neben den Programmdateien
   $alt = Join-Path $Work 'Alt'
   New-Item -ItemType Directory -Path $alt -Force | Out-Null
+  # Status vor dem ersten Ueberschreiben dauerhaft anlegen; laesst er sich nicht schreiben, wird nichts ausgetauscht
+  $pending = Join-Path $Work 'Wiederherstellung-offen'
+  $alt | Out-File -LiteralPath $pending -Encoding utf8 -ErrorAction Stop
+  if (-not (Test-Path -LiteralPath $pending)) { throw 'Statusdatei konnte nicht angelegt werden.' }
+  # Wiederherstellungsjournal: vor jedem Austausch Zielpfad, Sicherungsdatei und ob das Ziel vorher existierte
+  $journal = Join-Path $Work 'Wiederherstellung.txt'
+  @('IT-Themensammler-Update ' + $Version + ' - Wiederherstellungsjournal',
+    'Jede Zeile ""Vorher"" gilt als moeglicherweise ueberschrieben, auch ohne folgende Zeile ""Ersetzt"" (Abbruch waehrend des Kopierens).',
+    'Wiederherstellen fuer jede Zeile ""Vorher"": bei ""Sicherung"" die Sicherungsdatei auf das Ziel zurueckkopieren (sie ist vollstaendig), bei ""Neu"" die Zieldatei loeschen, falls vorhanden.',
+    '""Ersetzt n"" bestaetigt nur, dass der Austausch dieser Datei abgeschlossen wurde. Eine uebrig gebliebene ""Hilfsdatei"" kann geloescht werden.',
+    '') | Set-Content -LiteralPath $journal -Encoding utf8 -ErrorAction Stop
   $done = @()
   $i = 0
   try {
     foreach ($p in $pairs) {
       $i++
       $bak = Join-Path $alt ([string]$i)
+      $tmp = Join-Path (Split-Path $p[1] -Parent) ('.' + (Split-Path $p[1] -Leaf) + '.update-' + [Guid]::NewGuid().ToString('N'))
       $had = Test-Path -LiteralPath $p[1]
-      if ($had) { Copy-Item -LiteralPath $p[1] -Destination $bak -Force }
+      if ($had) {
+        Copy-Item -LiteralPath $p[1] -Destination ($bak + '.teil') -Force
+        Move-Item -LiteralPath ($bak + '.teil') -Destination $bak -Force
+        $line = 'Vorher ' + $i + ': Sicherung | Ziel: ' + $p[1] + ' | Sicherungsdatei: ' + $bak + ' | Hilfsdatei: ' + $tmp
+      } else {
+        $line = 'Vorher ' + $i + ': Neu | Ziel: ' + $p[1] + ' | Hilfsdatei: ' + $tmp
+      }
+      Add-Content -LiteralPath $journal -Value $line -Encoding utf8 -ErrorAction Stop
       $done += ,@($p[1], $bak, $had)
-      Copy-Item -LiteralPath $p[0] -Destination $p[1] -Force
+      Write-Entry $p[0] $p[1] $tmp $p[2]
+      Add-Content -LiteralPath $journal -Value ('Ersetzt ' + $i) -Encoding utf8 -ErrorAction SilentlyContinue
     }
   } catch {
+    # jede Datei einzeln zuruecksetzen, Fehler sammeln; bei unvollstaendiger Ruecksicherung Sicherung behalten und nicht neu starten
+    $err = $_.Exception.Message
+    $failed = @()
     foreach ($d in $done) {
-      if ($d[2]) { Copy-Item -LiteralPath $d[1] -Destination $d[0] -Force }
-      else { Remove-Item -LiteralPath $d[0] -Force -ErrorAction SilentlyContinue }
+      try {
+        if ($d[2]) { Restore-File $d[1] $d[0] }
+        else { Remove-Item -LiteralPath $d[0] -Force -ErrorAction Stop }
+      } catch { $failed += $d[0] }
     }
+    if ($failed.Count -gt 0) {
+      $noRestart = $true
+      throw ('Ruecksicherung unvollstaendig (' + ($failed -join ', ') + '). Die alten Dateien liegen in ' + $alt + ', die Zuordnung steht in ' + $journal + '. Fehler: ' + $err)
+    }
+    try { if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending -Force -ErrorAction Stop } } catch { $noRestart = $true }
     throw
   }
+  # Installation vollstaendig: erst Status entfernen, dann die Rueckfallkopien
+  try { Remove-Item -LiteralPath $pending -Force -ErrorAction Stop }
+  catch { $noRestart = $true; throw ('Update installiert, aber der Status in ' + $Work + ' konnte nicht entfernt werden.') }
+  Remove-Item -LiteralPath $alt -Recurse -Force -ErrorAction SilentlyContinue
   $result = 'OK ' + $Version
 } catch {
-  $result = 'FEHLER ' + $_.Exception.Message
+  # Abschlussstatus: FEHLER = nichts veraendert bzw. vollstaendig zurueckgesetzt (Neustart erlaubt),
+  # OFFEN = Ruecksicherung unvollstaendig (kein Neustart, Sicherung bleibt)
+  if ($noRestart) { $result = 'OFFEN ' + $_.Exception.Message } else { $result = 'FEHLER ' + $_.Exception.Message }
 }
-if ($stopped) { try { Start-Service -Name $Service } catch { $result = 'FEHLER Dienst startet nicht: ' + $_.Exception.Message } }
+if ($archive) { try { $archive.Dispose() } catch {} }
+if ($zipStream) { try { $zipStream.Dispose() } catch {} }
+# Dienst nur bei eindeutigem Abschluss wieder starten (OK oder FEHLER)
+if ($stopped -and -not $noRestart) { try { Start-Service -Name $Service } catch { $result = $result + ' Der Dienst startet nicht: ' + $_.Exception.Message } }
+# Ergebnis in den geschuetzten Datenordner (Update.log), Arbeitsordner nur ohne offene Wiederherstellung entfernen
 try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
-if ($workReady) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
-Remove-Item -LiteralPath $Attempt -Recurse -Force -ErrorAction SilentlyContinue
+if ($workReady -and -not $noRestart) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
+if (-not $noRestart) { Remove-Item -LiteralPath $Attempt -Recurse -Force -ErrorAction SilentlyContinue }
 if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }
-if (-not $NoStart) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
+# Verwaltungsfenster nach einem Update von Hand wieder starten: nur bei OK oder FEHLER und wenn die alte Instanz beendet ist
+if (-not $NoStart -and -not $noRestart) {
+  if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+    try { ($result + ' IT-Themensammler wurde nicht neu gestartet, weil die alte Instanz noch laeuft.') | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
+  } else { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
+}
+";
+
+        // Wiederherstellung nach einem nicht abgeschlossenen Update (Rückfrage im Verwaltungsfenster). Davor setzt das
+        // Programm: $ProcessId, $Work, $Exe, $ManualName, $TargetId, $Log, $Service. Liest das Journal, nimmt aber Ziele
+        // und Sicherungen nie ungeprüft daraus: Ziel nur EXE oder Liesmich, Sicherung immer <Work>\Alt\<Nummer>. Nur aus
+        // dem eigenen, geschützten Arbeitsordner unter ProgramData. Ergebnis: ZURUECK, FEHLER (nichts verändert) oder
+        // OFFEN (Wiederherstellung unvollständig, kein Neustart).
+        private const string RepairScript = @"
+$ErrorActionPreference = 'Stop'
+$result = $null
+$noRestart = $false
+$stopped = $false
+$target = Split-Path $Exe -Parent
+try {
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+  if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { throw 'IT-Themensammler wurde nicht beendet.' }
+  # nur aus dem eigenen, geschuetzten Arbeitsordner direkt unter ProgramData (Besitzer Administratoren/SYSTEM, keine Verknuepfung)
+  $item = Get-Item -LiteralPath $Work -Force
+  if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Unerwarteter Arbeitsordner.' }
+  $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+  $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+  $root = [Environment]::GetFolderPath('CommonApplicationData')
+  if ((Split-Path $Work -Parent) -ne $root -or (Split-Path $Work -Leaf) -notlike ('IT-Themensammler-Update-' + $TargetId + '-*')) { throw 'Unerwarteter Arbeitsordner.' }
+  $o = (Get-Acl -LiteralPath $Work).GetOwner([System.Security.Principal.SecurityIdentifier])
+  if (-not ($o -eq $admins -or $o -eq $system)) { throw 'Der Arbeitsordner ist nicht geschuetzt.' }
+  function Restore-File([string]$src, [string]$dst) {
+    $tmp = Join-Path (Split-Path $dst -Parent) ('.' + (Split-Path $dst -Leaf) + '.zurueck-' + [Guid]::NewGuid().ToString('N'))
+    try {
+      $in = [System.IO.File]::Open($src, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+      try {
+        $out = [System.IO.File]::Open($tmp, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try { $in.CopyTo($out); $out.Flush($true) } finally { $out.Dispose() }
+        if ((Get-Item -LiteralPath $tmp).Length -ne $in.Length) { throw ('Ruecksicherung von ' + $dst + ' unvollstaendig.') }
+      } finally { $in.Dispose() }
+      # [NullString]::Value statt $null: PowerShell macht aus $null sonst einen leeren Text (ungueltiger Pfad)
+      if (Test-Path -LiteralPath $dst) { [System.IO.File]::Replace($tmp, $dst, [NullString]::Value) }
+      else { [System.IO.File]::Move($tmp, $dst) }
+    } catch {
+      Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      throw
+    }
+  }
+  # Dienst beenden, solange die Dateien zurueckgesetzt werden
+  if ($Service) {
+    $svc = Get-Service -Name $Service -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -ne 'Stopped') { Stop-Service -Name $Service -Force; $stopped = $true }
+    $deadline = (Get-Date).AddSeconds(60)
+    while (Get-Process | Where-Object { $_.Path -eq $Exe }) {
+      if ((Get-Date) -gt $deadline) { throw 'Der Dienst wurde nicht beendet.' }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+  # Journal lesen, aber Ziele und Sicherungen nie ungeprueft daraus nehmen: Ziel nur EXE oder Liesmich, Sicherung immer <Work>\Alt\<Nummer>
+  $allowed = @($Exe, (Join-Path $target $ManualName))
+  $journal = Join-Path $Work 'Wiederherstellung.txt'
+  $lines = @()
+  if (Test-Path -LiteralPath $journal) { $lines = [System.IO.File]::ReadAllLines($journal) }
+  $failed = @()
+  foreach ($line in $lines) {
+    if (-not $line.StartsWith('Vorher ')) { continue }
+    if ($line -notmatch '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+?)? \| Hilfsdatei: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
+    $n = $Matches[1]; $kind = $Matches[2]; $dst = $Matches[3]; $tmp = $Matches[4]
+    if ($allowed -notcontains $dst) { throw 'Unerwarteter Eintrag im Journal.' }
+    try {
+      if ($kind -eq 'Sicherung') {
+        $bak = Join-Path (Join-Path $Work 'Alt') $n
+        if (-not (Test-Path -LiteralPath $bak -PathType Leaf)) { throw ('Sicherung fehlt: ' + $bak) }
+        $same = (Test-Path -LiteralPath $dst) -and ((Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash -eq (Get-FileHash -LiteralPath $bak -Algorithm SHA256).Hash)
+        if (-not $same) { Restore-File $bak $dst }
+      } elseif (Test-Path -LiteralPath $dst) {
+        Remove-Item -LiteralPath $dst -Force
+      }
+      if ((Split-Path $tmp -Parent) -eq $target -and (Split-Path $tmp -Leaf) -like ('.' + (Split-Path $dst -Leaf) + '.update-*')) {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+      }
+    } catch { $failed += ($dst + ': ' + $_.Exception.Message) }
+  }
+  if ($failed.Count -gt 0) { $noRestart = $true; throw ('Wiederherstellung unvollstaendig (' + ($failed -join '; ') + ').') }
+  Remove-Item -LiteralPath (Join-Path $Work 'Wiederherstellung-offen') -Force
+  $result = 'ZURUECK Die vorherige Version wurde wiederhergestellt.'
+} catch {
+  if ($noRestart) { $result = 'OFFEN ' + $_.Exception.Message } else { $result = 'FEHLER ' + $_.Exception.Message }
+}
+if ($stopped -and -not $noRestart) { try { Start-Service -Name $Service } catch { $result = $result + ' Der Dienst startet nicht: ' + $_.Exception.Message } }
+try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
+if ($result.StartsWith('ZURUECK')) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
+if (-not $noRestart -and -not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' }
 ";
 
 
@@ -823,7 +1364,18 @@ if (-not $NoStart) { Start-Process -FilePath $Exe -ArgumentList '--nach-update' 
             {
                 if (Demo.Active || !Auto || !AutoInstall) return;
                 if (!UpdateCheck.IsNewer(Speicher.EinstellungenLesen().updateVersion)) return;
-                if (UpdateCheck.InstallBlocker() != null || DateTime.UtcNow < _naechsterVersuch) return;
+                if (DateTime.UtcNow < _naechsterVersuch) return;
+                string blocker = UpdateCheck.InstallBlocker();
+                if (blocker != null)
+                {
+                    if (blocker == UpdateCheck.PendingText)
+                    {
+                        // Wiederherstellung nur per Rückfrage im Verwaltungsfenster; Hinweis höchstens stündlich
+                        _naechsterVersuch = DateTime.UtcNow.AddHours(1);
+                        Speicher.Protokoll("Automatisches Update wartet: " + blocker + " Bitte das Verwaltungsfenster öffnen und „Jetzt aktualisieren“ wählen.");
+                    }
+                    return;
+                }
                 string grund = Beschaeftigt();
                 if (grund != null)
                 {
