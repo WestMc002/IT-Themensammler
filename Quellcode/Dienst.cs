@@ -352,6 +352,55 @@ namespace ITThemensammler
             Ausfuehren(Netsh, "advfirewall firewall delete rule name=\"" + FirewallRegelProxy + "\"", true);
         }
 
+        /// <summary>
+        /// Hinweis zur Firewall für die Karte „Webserver“ (leer = alles in Ordnung). „Öffentlich“ nur, wenn kein Netz als
+        /// Privat oder Domäne eingestuft ist: CurrentProfileTypes enthält die Profile aller Verbindungen, ein öffentlicher
+        /// VPN- oder virtueller Adapter allein löst also nichts aus. Andere bei Windows registrierte Firewalls (z. B. ESET)
+        /// werden mit dem freizugebenden Port genannt. Fehler bei der Abfrage zeigen nichts an.
+        /// </summary>
+        public static string FirewallHinweis(int port)
+        {
+            var teile = new List<string>();
+            try
+            {
+                var typ = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (typ != null)
+                {
+                    object policy = Activator.CreateInstance(typ);
+                    int profile = Convert.ToInt32(typ.InvokeMember("CurrentProfileTypes", System.Reflection.BindingFlags.GetProperty, null, policy, null), CultureInfo.InvariantCulture);
+                    // 1 = Domäne, 2 = Privat, 4 = Öffentlich
+                    if ((profile & 3) == 0 && (profile & 4) != 0)
+                        teile.Add("Das Netzwerk dieses Rechners ist als „Öffentlich“ eingestuft – die Firewall-Regel gilt nur für Domäne und privates Netz. " +
+                                  "Netzwerk in den Windows-Einstellungen auf „Privat“ stellen.");
+                }
+            }
+            catch { }
+            try
+            {
+                var typ = Type.GetTypeFromProgID("HNetCfg.FwProducts");
+                if (typ != null)
+                {
+                    object produkte = Activator.CreateInstance(typ);
+                    int anzahl = Convert.ToInt32(typ.InvokeMember("Count", System.Reflection.BindingFlags.GetProperty, null, produkte, null), CultureInfo.InvariantCulture);
+                    var namen = new List<string>();
+                    for (int i = 0; i < anzahl && i < 10; i++)
+                    {
+                        object produkt = typ.InvokeMember("Item", System.Reflection.BindingFlags.InvokeMethod, null, produkte, new object[] { i });
+                        if (produkt == null) continue;
+                        string name = Convert.ToString(produkt.GetType().InvokeMember("DisplayName", System.Reflection.BindingFlags.GetProperty, null, produkt, null), CultureInfo.InvariantCulture);
+                        name = Speicher.Einzeilig(name ?? "").Trim();
+                        if (name.Length > 60) name = name.Substring(0, 60);
+                        if (name.Length > 0 && !namen.Contains(name)) namen.Add(name);
+                    }
+                    if (namen.Count > 0)
+                        teile.Add("Zusätzlich ist " + string.Join(", ", namen.ToArray()) + " als Firewall aktiv – dort TCP-Port " +
+                                  port.ToString(CultureInfo.InvariantCulture) + " eingehend freigeben.");
+                }
+            }
+            catch { }
+            return string.Join(" ", teile.ToArray());
+        }
+
         // ------------------------------------------------------------------ Hilfen
 
         /// <summary>PowerShell-Befehl unsichtbar ausführen; Rückgabe: Exit-Code (-1 bei Fehler).</summary>

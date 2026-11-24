@@ -319,6 +319,12 @@ aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
 der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.37  Hinweis unter dem Port, wenn das Netzwerk als „Öffentlich“ eingestuft
+      ist (die Firewall-Regel gilt nur für Domäne und privates Netz) oder
+      zusätzlich eine andere Firewall (z. B. ESET) aktiv ist, mit dem
+      freizugebenden Port; läuft der Dienst nach einem Update nicht wieder
+      an, gilt das Update nicht mehr als erfolgreich (eigene Meldung, erst
+      der bestätigte Dienststatus „Läuft“ zählt)
 1.36  Wiederherstellung nach einem nicht abgeschlossenen Update noch
       sicherer: Protokoll der alten Stände mit Prüfsummen und Plan, dauerhaft
       auf den Datenträger geschrieben; vor dem Zurücksetzen wird alles geprüft

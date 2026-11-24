@@ -966,7 +966,31 @@ namespace ITThemensammler
         }
 
         /// <summary>
-        /// Ergebnis des letzten Updates ("OK x", "FEHLER …", "ZURUECK …", "OFFEN …") nach dem Neustart mit --nach-update.
+        /// Ergebnis des Update- bzw. Reparatur-Skripts einordnen. „DIENST“ heißt: Dateien fertig (bzw. unverändert oder
+        /// zurückgesetzt), aber der vorher laufende Dienst lief danach nicht (kein bestätigter Status Running) – nie Erfolg.
+        /// </summary>
+        public static UpdateResult ResultKind(string result, out string version)
+        {
+            version = "";
+            if (string.IsNullOrEmpty(result)) return UpdateResult.Unknown;
+            string[] w = result.Split(new[] { ' ' }, 3);
+            switch (w[0])
+            {
+                case "OK":
+                    if (w.Length > 1) version = w[1];
+                    return UpdateResult.Ok;
+                case "ZURUECK": return UpdateResult.Restored;
+                case "DIENST":
+                    if (w.Length > 1 && w[1] == "zurueck") return UpdateResult.ServiceRestored;
+                    if (w.Length > 1 && w[1] == "alt") return UpdateResult.ServiceOld;
+                    if (w.Length > 1) version = w[1];
+                    return UpdateResult.ServiceInstalled;
+                default: return UpdateResult.Failed;
+            }
+        }
+
+        /// <summary>
+        /// Ergebnis des letzten Updates ("OK x", "FEHLER …", "ZURUECK …", "OFFEN …", "DIENST …") nach dem Neustart mit --nach-update.
         /// Das Ergebnis ist eine kurze Zeile: höchstens 16 KB lesen, eine größere Datei gilt als unbekanntes Ergebnis.
         /// </summary>
         public static string LastResult()
@@ -1059,7 +1083,7 @@ try {
         // Ablauf nach den globalen Vorgaben (Selbst-Update, Schritte 2–6): Sperre, Ende des Verwaltungsfensters abwarten,
         // geschützter Arbeitsordner direkt unter ProgramData, ZIP und Manifest begrenzt hineinkopieren, Signatur und SHA-256
         // dort prüfen, nur IT-Themensammler.exe und Liesmich.txt direkt aus dem Archiv über Hilfsdateien atomar ersetzen,
-        // Merker "Wiederherstellung-offen" und Journal, Rücksicherung je Datei. Abschluss "OK", "FEHLER" oder "OFFEN";
+        // Merker "Wiederherstellung-offen" und Journal, Rücksicherung je Datei. Abschluss "OK", "FEHLER", "OFFEN" oder "DIENST" (Dienst danach nicht Running);
         // Dienst bzw. Verwaltungsfenster starten nur bei OK oder FEHLER. Nur ASCII-Anführungszeichen verwenden.
         private const string Script = @"
 $ErrorActionPreference = 'Stop'
@@ -1365,8 +1389,17 @@ try {
 }
 if ($archive) { try { $archive.Dispose() } catch {} }
 if ($zipStream) { try { $zipStream.Dispose() } catch {} }
-# Dienst nur bei eindeutigem Abschluss wieder starten (OK oder FEHLER)
-if ($stopped -and -not $noRestart) { try { Start-Service -Name $Service } catch { $result = $result + ' Der Dienst startet nicht: ' + $_.Exception.Message } }
+# Dienst nur bei eindeutigem Abschluss wieder starten (OK oder FEHLER). Erfolg erst bei bestaetigtem Status Running;
+# sonst eigenes Ergebnis DIENST (installiert bzw. unveraendert, aber der Dienst laeuft nicht), nie OK
+if ($stopped -and -not $noRestart) {
+  $svcErr = $null
+  try { Start-Service -Name $Service; (Get-Service -Name $Service).WaitForStatus('Running', [TimeSpan]::FromSeconds(60)) } catch { $svcErr = $_.Exception.Message }
+  if (-not $svcErr) { try { $st = (Get-Service -Name $Service).Status; if ($st -ne 'Running') { $svcErr = 'Status ' + $st } } catch { $svcErr = $_.Exception.Message } }
+  if ($svcErr) {
+    if ($result.StartsWith('OK ')) { $result = 'DIENST ' + $Version + ' Update installiert, aber der Dienst laeuft nicht: ' + $svcErr }
+    else { $result = 'DIENST alt ' + $result + ' Der Dienst laeuft nicht: ' + $svcErr }
+  }
+}
 # Ergebnis in den geschuetzten Datenordner (Update.log), Arbeitsordner nur ohne offene Wiederherstellung entfernen
 try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch {}
 if ($workReady -and -not $noRestart) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1578,7 +1611,15 @@ try {
 } catch {
   if ($noRestart) { $result = 'OFFEN ' + $_.Exception.Message } else { $result = 'FEHLER ' + $_.Exception.Message }
 }
-if ($stopped -and -not $noRestart) { try { Start-Service -Name $Service } catch { $result = $result + ' Der Dienst startet nicht: ' + $_.Exception.Message } }
+if ($stopped -and -not $noRestart) {
+  $svcErr = $null
+  try { Start-Service -Name $Service; (Get-Service -Name $Service).WaitForStatus('Running', [TimeSpan]::FromSeconds(60)) } catch { $svcErr = $_.Exception.Message }
+  if (-not $svcErr) { try { $st = (Get-Service -Name $Service).Status; if ($st -ne 'Running') { $svcErr = 'Status ' + $st } } catch { $svcErr = $_.Exception.Message } }
+  if ($svcErr) {
+    if ($result.StartsWith('ZURUECK')) { $result = 'DIENST zurueck Vorherige Version wiederhergestellt, aber der Dienst laeuft nicht: ' + $svcErr }
+    else { $result = 'DIENST alt ' + $result + ' Der Dienst laeuft nicht: ' + $svcErr }
+  }
+}
 try { $result | Out-File -LiteralPath $Log -Encoding utf8 } catch { $noRestart = $true }
 if ($result.StartsWith('ZURUECK')) { Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue }
 if ($haveLock) { try { $lock.ReleaseMutex() } catch {} }
@@ -1842,16 +1883,31 @@ if (-not $noRestart -and -not (Test-OldInstance)) { Start-Process -FilePath $Exe
                 if (alt) File.Delete(OldMarker);
                 string result = UpdateCheck.LastResult();
                 if (result == null) return;
-                if (result.StartsWith("OK"))
-                    Speicher.Protokoll("Automatisches Update auf Version " + result.Substring(2).Trim() + " installiert");
-                else
-                    Speicher.Protokoll("Automatisches Update fehlgeschlagen: " + result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter");
+                string version;
+                switch (UpdateCheck.ResultKind(result, out version))
+                {
+                    case UpdateResult.Ok:
+                        Speicher.Protokoll("Automatisches Update auf Version " + version + " installiert");
+                        break;
+                    case UpdateResult.ServiceInstalled:
+                    case UpdateResult.ServiceOld:
+                    case UpdateResult.ServiceRestored:
+                        // der Dienst lief nach dem Update nicht an (hier läuft er inzwischen wieder, z. B. von Hand gestartet)
+                        Speicher.Fehler("Automatisches Update: der Dienst lief danach nicht an – " + result, null);
+                        break;
+                    default:
+                        Speicher.Protokoll("Automatisches Update fehlgeschlagen: " + result.Replace("FEHLER", "").Trim() + " – die bisherige Version läuft weiter");
+                        break;
+                }
             }
             catch { }
         }
     }
 
     internal enum UpdateKind { Unknown, Current, Available, Failed, Checking }
+
+    /// <summary>Ergebnis eines Update- bzw. Reparatur-Skripts (siehe UpdateCheck.ResultKind).</summary>
+    internal enum UpdateResult { Unknown, Ok, Restored, Failed, ServiceInstalled, ServiceOld, ServiceRestored }
 
     /// <summary>Stand der Update-Prüfung für das Info-Fenster.</summary>
     internal sealed class UpdateStatus

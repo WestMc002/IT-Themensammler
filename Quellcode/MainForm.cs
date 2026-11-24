@@ -47,6 +47,8 @@ namespace ITThemensammler
 
         // Webserver (Einstellungsseite: erst mit "Speichern" übernehmen)
         private readonly CardPanel _cardServer;
+        private readonly Label _fwHint;
+        private int _fwPort = -1;
         private readonly ModernTextBox _port;
         // Zugriff von außen über den Entra-Anwendungsproxy (Microsoft 365)
         private readonly CardPanel _cardProxy;
@@ -165,6 +167,9 @@ namespace ITThemensammler
             _cardServer.Controls.Add(_port);
             _cardServer.Controls.Add(portHint);
             _cardServer.Tag = portHint;
+            // Hinweis zur Firewall (Netz „Öffentlich“, weitere Firewall), nur wenn es einen gibt
+            _fwHint = new Label { ForeColor = Ui.Yellow, BackColor = Ui.Card, UseMnemonic = false, Visible = false };
+            _cardServer.Controls.Add(_fwHint);
 
             // ---------- Karte Zugriff von außen (Microsoft 365) ----------
             _cardProxy = new CardPanel(k) { Title = "Zugriff von außen (Microsoft 365)" };
@@ -284,6 +289,7 @@ namespace ITThemensammler
             MaximumSize = new Size(Width, Math.Max(SystemInformation.VirtualScreen.Height, Height) * 2);
             MinimumSize = new Size(Width, Math.Min(S(520), Height));
             Ui.CenterOnScreen(this);
+            FirewallHinweisAktualisieren(_gespeicherterPort); // im Konstruktor gab es noch kein Fenster-Handle
             if (Speicher.EinstellungenLesen().konten.Count == 0)
                 Meldung("Noch kein Admin-Konto angelegt – bitte zuerst unter „Admin-Konten“ ein Konto hinzufügen.", false);
         }
@@ -349,7 +355,14 @@ namespace ITThemensammler
             var hint = (Label)_cardServer.Tag;
             hint.Width = w - S(40);
             hint.Height = TextRenderer.MeasureText(hint.Text, hint.Font, new Size(hint.Width, 0), TextFormatFlags.WordBreak).Height + S(4);
-            _cardServer.Height = hint.Bottom + S(18);
+            int serverBottom = hint.Bottom;
+            if (_fwHint.Visible)
+            {
+                _fwHint.SetBounds(hint.Left, hint.Bottom + S(6), hint.Width,
+                    TextRenderer.MeasureText(_fwHint.Text, _fwHint.Font, new Size(hint.Width, 0), TextFormatFlags.WordBreak).Height + S(4));
+                serverBottom = _fwHint.Bottom;
+            }
+            _cardServer.Height = serverBottom + S(18);
             y += _cardServer.Height + S(16);
 
             // Zugriff von außen (Microsoft 365)
@@ -550,6 +563,30 @@ namespace ITThemensammler
             ProxyFelderSchalten();
             _error.Text = "";
             GeaendertAnzeigen();
+            FirewallHinweisAktualisieren(_gespeicherterPort);
+        }
+
+        /// <summary>Firewall-Hinweis im Hintergrund ermitteln (COM-Abfrage) und unter dem Port anzeigen.</summary>
+        private void FirewallHinweisAktualisieren(int port)
+        {
+            if (Demo.Active || !IsHandleCreated || port == _fwPort) return;
+            _fwPort = port;
+            Task.Run(() =>
+            {
+                string text = DienstSteuerung.FirewallHinweis(port);
+                try
+                {
+                    if (IsDisposed || !IsHandleCreated) return;
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (IsDisposed || port != _fwPort) return;
+                        _fwHint.Text = text;
+                        _fwHint.Visible = text.Length > 0;
+                        Anordnen();
+                    }));
+                }
+                catch { }
+            });
         }
 
         /// <summary>Felder des Anwendungsproxys nur mit eingeschaltetem Schalter bearbeitbar (sofort sichtbar, übernommen erst beim Speichern).</summary>
@@ -854,23 +891,36 @@ namespace ITThemensammler
             {
                 // Neustart durch das Update-Skript: Ergebnis melden
                 string result = UpdateCheck.LastResult();
-                if (result != null && result.StartsWith("OK"))
+                string v;
+                switch (UpdateCheck.ResultKind(result, out v))
                 {
-                    string v = result.Substring(2).Trim();
-                    Meldung("Update auf Version " + v + " installiert.", false);
-                    _message.ForeColor = Ui.Green;
-                    Speicher.Protokoll("Update auf Version " + v + " installiert");
-                }
-                else if (result != null && result.StartsWith("ZURUECK"))
-                {
-                    Meldung("Vorherige Version wiederhergestellt.", false);
-                    Speicher.Protokoll("Nicht abgeschlossenes Update: vorherige Version wiederhergestellt");
-                }
-                else if (result != null)
-                {
-                    // Meldung ohne Technik und Pfade; Einzelheiten nur ins Fehlerprotokoll
-                    Meldung("Update nicht installiert – die bisherige Version läuft weiter. Einzelheiten stehen im Fehlerprotokoll.", true);
-                    Speicher.Fehler("Update nicht installiert: " + result, null);
+                    case UpdateResult.Ok:
+                        Meldung("Update auf Version " + v + " installiert.", false);
+                        _message.ForeColor = Ui.Green;
+                        Speicher.Protokoll("Update auf Version " + v + " installiert");
+                        break;
+                    case UpdateResult.Restored:
+                        Meldung("Vorherige Version wiederhergestellt.", false);
+                        Speicher.Protokoll("Nicht abgeschlossenes Update: vorherige Version wiederhergestellt");
+                        break;
+                    // Dateien fertig, aber der Dienst lief danach nicht an: nie als Erfolg melden (Meldung ohne Technik)
+                    case UpdateResult.ServiceInstalled:
+                        Meldung("Update auf Version " + v + " installiert, aber der Dienst läuft nicht. Bitte den Dienst starten; Einzelheiten stehen im Fehlerprotokoll.", true);
+                        Speicher.Fehler("Update installiert, Dienst läuft nicht: " + result, null);
+                        break;
+                    case UpdateResult.ServiceRestored:
+                        Meldung("Vorherige Version wiederhergestellt, aber der Dienst läuft nicht. Bitte den Dienst starten; Einzelheiten stehen im Fehlerprotokoll.", true);
+                        Speicher.Fehler("Wiederherstellung abgeschlossen, Dienst läuft nicht: " + result, null);
+                        break;
+                    case UpdateResult.ServiceOld:
+                        Meldung("Update nicht installiert, und der Dienst läuft nicht. Bitte den Dienst starten; Einzelheiten stehen im Fehlerprotokoll.", true);
+                        Speicher.Fehler("Update nicht installiert, Dienst läuft nicht: " + result, null);
+                        break;
+                    case UpdateResult.Failed:
+                        // Meldung ohne Technik und Pfade; Einzelheiten nur ins Fehlerprotokoll
+                        Meldung("Update nicht installiert – die bisherige Version läuft weiter. Einzelheiten stehen im Fehlerprotokoll.", true);
+                        Speicher.Fehler("Update nicht installiert: " + result, null);
+                        break;
                 }
             }
             _updateTimer.Tick += async (s, e) =>
