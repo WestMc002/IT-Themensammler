@@ -37,6 +37,9 @@ namespace ITThemensammler
             {
                 Umzug.Programm(); // früherer Name: aus dem alten Programmordner umziehen (startet dann neu) bzw. Reste entfernen
                 _server.Starten();
+                // Firewall-Regel aus älteren Versionen (ohne Programmbindung, für alle Adressen) im Hintergrund erneuern
+                int port = _server.Port;
+                System.Threading.Tasks.Task.Run(() => DienstSteuerung.FirewallPruefenImDienst(port));
                 UpdatePruefung.DienstStarten(); // neue Version auf GitHub? (Hinweis in der Weboberfläche)
                 Ereignis.Schreiben(Ereignis.Gestartet, EventLogEntryType.Information,
                     "Dienst gestartet. Weboberfläche auf Port " + _server.Port + ", Version " + AppInfo.Version + ".");
@@ -332,18 +335,41 @@ namespace ITThemensammler
 
         // ------------------------------------------------------------------ Firewall
 
-        /// <summary>Eingehende Verbindungen auf den Port erlauben (Profile Domäne und Privat), vorhandene Regel ersetzen.</summary>
+        /// <summary>
+        /// Remote-Adressen der Hauptregel: eigenes Teilnetz sowie private Adressbereiche (Firmennetz, Heimnetz, VPN). Aus dem
+        /// Internet ist die Weboberfläche nur über den Entra-Anwendungsproxy erreichbar (eigene Regel nur für dessen Connector).
+        /// </summary>
+        private static readonly string[] LokaleBereiche =
+        {
+            "LocalSubnet", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10", "fc00::/7", "fe80::/10"
+        };
+
+        private const int FwTcp = 6, FwDomaene = 1, FwPrivat = 2, FwOeffentlich = 4;
+
+        /// <summary>
+        /// Eingehende Verbindungen auf den Port erlauben, vorhandene Regeln ersetzen. Nur TCP, nur das Programm des Dienstes,
+        /// nur die Profile Domäne und Privat, edge=no; Hauptregel nur für lokale Adressen, Proxy-Regel nur für die Connector-IPs.
+        /// </summary>
         public static void FirewallSetzen(int port)
         {
+            string exe = ProgrammPfad;
+            if (exe.IndexOf('"') >= 0) throw new InvalidOperationException("Der Programmpfad enthält ein Anführungszeichen.");
             FirewallEntfernen();
             Ausfuehren(Netsh, "advfirewall firewall add rule name=\"" + FirewallRegel + "\" dir=in action=allow protocol=TCP localport=" +
-                port.ToString(CultureInfo.InvariantCulture) + " profile=domain,private", false);
+                port.ToString(CultureInfo.InvariantCulture) + " remoteip=" + string.Join(",", LokaleBereiche) +
+                " profile=domain,private edge=no program=\"" + exe + "\" enable=yes", false);
             // Zugriff von außen: Port für den Anwendungsproxy nur für die Connector-Server
             var e = Speicher.EinstellungenLesen();
-            var ips = e.proxyIps.Where(x => { System.Net.IPAddress a; return System.Net.IPAddress.TryParse(x, out a); }).ToList();
+            var ips = ProxyIps(e);
             if (e.proxyAn == true && ips.Count > 0 && e.proxyPort != port)
                 Ausfuehren(Netsh, "advfirewall firewall add rule name=\"" + FirewallRegelProxy + "\" dir=in action=allow protocol=TCP localport=" +
-                    e.proxyPort.ToString(CultureInfo.InvariantCulture) + " remoteip=" + string.Join(",", ips.ToArray()) + " profile=domain,private", false);
+                    e.proxyPort.ToString(CultureInfo.InvariantCulture) + " remoteip=" + string.Join(",", ips.ToArray()) +
+                    " profile=domain,private edge=no program=\"" + exe + "\" enable=yes", false);
+        }
+
+        private static List<string> ProxyIps(Einstellungen e)
+        {
+            return e.proxyIps.Where(x => { System.Net.IPAddress a; return System.Net.IPAddress.TryParse(x, out a); }).ToList();
         }
 
         public static void FirewallEntfernen()
@@ -353,14 +379,264 @@ namespace ITThemensammler
         }
 
         /// <summary>
-        /// Hinweis zur Firewall für die Karte „Webserver“ (leer = alles in Ordnung). „Öffentlich“ nur, wenn kein Netz als
-        /// Privat oder Domäne eingestuft ist: CurrentProfileTypes enthält die Profile aller Verbindungen, ein öffentlicher
-        /// VPN- oder virtueller Adapter allein löst also nichts aus. Andere bei Windows registrierte Firewalls (z. B. ESET)
-        /// werden mit dem freizugebenden Port genannt. Fehler bei der Abfrage zeigen nichts an.
+        /// Im Dienst beim Start: Fehlt eine eigene Regel, ist sie zu weit gefasst (z. B. aus einer Version vor 1.38 ohne
+        /// Programmbindung und für alle Adressen) oder für einen anderen Port bzw. Programmordner, wird sie neu angelegt.
+        /// Ist die Windows-Firewall aus, bleibt alles, wie es ist.
+        /// </summary>
+        public static void FirewallPruefenImDienst(int port)
+        {
+            try
+            {
+                bool reparieren;
+                string problem = FirewallProblem(port, out reparieren);
+                if (problem == null || !reparieren) return;
+                FirewallSetzen(port);
+                Speicher.Protokoll("Firewall-Regel neu angelegt (" + problem + ")");
+            }
+            catch (Exception ex) { Speicher.Fehler("Firewall-Regel prüfen", ex); }
+        }
+
+        /// <summary>
+        /// Eigene Regeln prüfen (alle Regeln mit diesem Namen, von Hand angelegte Doppel eingeschlossen). null = in Ordnung
+        /// bzw. nicht prüfbar oder Windows-Firewall aus. reparieren = mit FirewallSetzen behebbar.
+        /// </summary>
+        public static string FirewallProblem(int port, out bool reparieren)
+        {
+            reparieren = false;
+            try
+            {
+                var typ = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");
+                if (typ == null) return null;
+                object policy = Activator.CreateInstance(typ);
+                int aktuell = Zahl(Lesen(policy, "CurrentProfileTypes"));
+                bool aktiv = false;
+                foreach (int p in new[] { FwDomaene, FwPrivat, FwOeffentlich })
+                {
+                    if ((aktuell & p) == 0) continue;
+                    object an = typ.InvokeMember("FirewallEnabled", System.Reflection.BindingFlags.GetProperty, null, policy, new object[] { p });
+                    if (an is bool && (bool)an) aktiv = true;
+                }
+                if (!aktiv) return null; // Windows-Firewall aus (z. B. andere Firewall)
+                var e = Speicher.EinstellungenLesen();
+                var proxyIps = ProxyIps(e);
+                bool proxy = e.proxyAn == true && proxyIps.Count > 0 && e.proxyPort != port;
+                var haupt = new List<object>();
+                var proxyRegeln = new List<object>();
+                foreach (object r in (System.Collections.IEnumerable)Lesen(policy, "Rules"))
+                {
+                    string name = Convert.ToString(Lesen(r, "Name"), CultureInfo.InvariantCulture);
+                    if (string.Equals(name, FirewallRegel, StringComparison.OrdinalIgnoreCase)) haupt.Add(r);
+                    else if (string.Equals(name, FirewallRegelProxy, StringComparison.OrdinalIgnoreCase)) proxyRegeln.Add(r);
+                }
+                reparieren = true;
+                if (haupt.Count == 0) return "Die Firewall-Regel fehlt";
+                string problem = Gesamt(haupt, port, null);
+                if (problem == null && proxy)
+                {
+                    if (proxyRegeln.Count == 0) return "Die Firewall-Regel für den Anwendungsproxy fehlt";
+                    problem = Gesamt(proxyRegeln, e.proxyPort, proxyIps);
+                }
+                else if (problem == null && proxyRegeln.Count > 0)
+                    problem = "!Die Firewall-Regel für den Anwendungsproxy ist noch vorhanden, obwohl der Zugriff von außen aus ist";
+                if (problem == null) return null;
+                return problem.TrimStart('!');
+            }
+            catch
+            {
+                reparieren = false;
+                return null; // nicht prüfbar: keine Anzeige
+            }
+        }
+
+        /// <summary>Mehrere Regeln gleichen Namens: eine zu weite („!“) zählt immer, sonst genügt eine passende.</summary>
+        private static string Gesamt(List<object> regeln, int port, List<string> erlaubteIps)
+        {
+            string problem = null;
+            bool passend = false;
+            foreach (object r in regeln)
+            {
+                string p = RegelProblem(r, port, erlaubteIps);
+                if (p == null) passend = true;
+                else if (problem == null || p.StartsWith("!", StringComparison.Ordinal)) problem = p;
+            }
+            if (problem != null && (problem.StartsWith("!", StringComparison.Ordinal) || !passend)) return problem;
+            return null;
+        }
+
+        /// <summary>Problem einer Regel; „!“ am Anfang = die Regel reicht weiter als vorgesehen.</summary>
+        private static string RegelProblem(object r, int port, List<string> erlaubteIps)
+        {
+            bool an = Lesen(r, "Enabled") is bool && (bool)Lesen(r, "Enabled");
+            if (!an || Zahl(Lesen(r, "Action")) != 1 || Zahl(Lesen(r, "Direction")) != 1) return "Die Firewall-Regel ist ausgeschaltet";
+            string app = Convert.ToString(Lesen(r, "ApplicationName"), CultureInfo.InvariantCulture);
+            if (string.IsNullOrEmpty(app)) return "!Die Firewall-Regel gilt für alle Programme";
+            if (!SelbePfade(app, ProgrammPfad)) return "Die Firewall-Regel gilt für einen anderen Programmordner";
+            int protokoll = Zahl(Lesen(r, "Protocol"));
+            if (protokoll != FwTcp) return protokoll == 256 ? "!Die Firewall-Regel gilt für alle Protokolle" : "Die Firewall-Regel gilt nicht für TCP";
+            string portProblem = PortProblem(Convert.ToString(Lesen(r, "LocalPorts"), CultureInfo.InvariantCulture), port);
+            if (portProblem != null) return portProblem;
+            if ((Zahl(Lesen(r, "Profiles")) & FwOeffentlich) != 0) return "!Die Firewall-Regel gilt auch in öffentlichen Netzen";
+            bool edge = false;
+            try { object x = Lesen(r, "EdgeTraversal"); edge = x is bool && (bool)x; } catch { }
+            if (edge) return "!Die Firewall-Regel lässt Verbindungen über das Internet zu (Edge Traversal)";
+            string remote = Convert.ToString(Lesen(r, "RemoteAddresses"), CultureInfo.InvariantCulture);
+            if (erlaubteIps == null ? !NurLokal(remote) : !NurDiese(remote, erlaubteIps))
+                return erlaubteIps == null ? "!Die Firewall-Regel gilt auch für Adressen aus dem Internet"
+                                           : "!Die Firewall-Regel für den Anwendungsproxy gilt nicht nur für die Connector-Adressen";
+            return null;
+        }
+
+        /// <summary>
+        /// Genau der eigene Port = in Ordnung. Portlisten, Bereiche und Schlüsselwörter, die mehr freigeben, gelten als zu
+        /// weit („!“); fehlt der eigene Port, gilt die Regel für einen anderen Port.
+        /// </summary>
+        private static string PortProblem(string ports, int port)
+        {
+            string alle = (ports ?? "").Trim();
+            if (alle == port.ToString(CultureInfo.InvariantCulture)) return null;
+            if (alle == "*") return "!Die Firewall-Regel gilt für alle Ports";
+            bool enthalten = false, weitere = false;
+            foreach (string roh in alle.Split(','))
+            {
+                string e = roh.Trim();
+                if (e.Length == 0) continue;
+                int a, b, strich = e.IndexOf('-');
+                if (strich > 0 && int.TryParse(e.Substring(0, strich).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out a) &&
+                    int.TryParse(e.Substring(strich + 1).Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out b))
+                {
+                    if (a <= port && port <= b) enthalten = true;
+                    if (a != port || b != port) weitere = true;
+                }
+                else if (int.TryParse(e, NumberStyles.None, CultureInfo.InvariantCulture, out a))
+                {
+                    if (a == port) enthalten = true; else weitere = true;
+                }
+                else weitere = true; // Schlüsselwörter (z. B. RPC) oder Unlesbares
+            }
+            if (!enthalten) return "Die Firewall-Regel gilt für einen anderen Port";
+            if (weitere) return "!Die Firewall-Regel gilt auch für weitere Ports";
+            return null;
+        }
+
+        /// <summary>Liegt jeder Eintrag ganz im eigenen Teilnetz bzw. in privaten Bereichen? Unbekanntes zählt als nein.</summary>
+        private static bool NurLokal(string remote)
+        {
+            if (string.IsNullOrEmpty(remote)) return false;
+            foreach (string roh in remote.Split(','))
+            {
+                string e = roh.Trim();
+                if (e.Length == 0) continue;
+                if (e.Equals("LocalSubnet", StringComparison.OrdinalIgnoreCase)) continue;
+                byte[] lo, hi;
+                if (!Bereich(e, out lo, out hi)) return false; // "*", "Internet", Unlesbares
+                bool drin = false;
+                foreach (string block in LokaleBereiche)
+                {
+                    byte[] blo, bhi;
+                    if (Bereich(block, out blo, out bhi) && blo.Length == lo.Length && Vergleich(lo, blo) >= 0 && Vergleich(hi, bhi) <= 0) { drin = true; break; }
+                }
+                if (!drin) return false;
+            }
+            return true;
+        }
+
+        /// <summary>Enthält die Regel nur Einzeladressen aus der Liste der Connector-IPs?</summary>
+        private static bool NurDiese(string remote, List<string> ips)
+        {
+            if (string.IsNullOrEmpty(remote)) return false;
+            foreach (string roh in remote.Split(','))
+            {
+                byte[] lo, hi;
+                if (!Bereich(roh.Trim(), out lo, out hi) || Vergleich(lo, hi) != 0) return false;
+                bool bekannt = false;
+                foreach (string ip in ips)
+                {
+                    System.Net.IPAddress a;
+                    if (System.Net.IPAddress.TryParse(ip, out a))
+                    {
+                        byte[] b = a.GetAddressBytes();
+                        if (b.Length == lo.Length && Vergleich(b, lo) == 0) { bekannt = true; break; }
+                    }
+                }
+                if (!bekannt) return false;
+            }
+            return true;
+        }
+
+        /// <summary>„Adresse“, „Adresse/Maske“, „Adresse/Präfix“ oder „Von-Bis“ als Bereich (Bytes).</summary>
+        private static bool Bereich(string e, out byte[] lo, out byte[] hi)
+        {
+            lo = hi = null;
+            System.Net.IPAddress a, b;
+            int strich = e.IndexOf('-');
+            if (strich > 0)
+            {
+                if (!System.Net.IPAddress.TryParse(e.Substring(0, strich), out a) || !System.Net.IPAddress.TryParse(e.Substring(strich + 1), out b)) return false;
+                lo = a.GetAddressBytes(); hi = b.GetAddressBytes();
+                return lo.Length == hi.Length && Vergleich(lo, hi) <= 0;
+            }
+            int schraeg = e.IndexOf('/');
+            if (schraeg < 0)
+            {
+                if (!System.Net.IPAddress.TryParse(e, out a)) return false;
+                lo = a.GetAddressBytes(); hi = (byte[])lo.Clone();
+                return true;
+            }
+            if (!System.Net.IPAddress.TryParse(e.Substring(0, schraeg), out a)) return false;
+            byte[] adr = a.GetAddressBytes();
+            string m = e.Substring(schraeg + 1);
+            int praefix;
+            System.Net.IPAddress maske;
+            if (!int.TryParse(m, NumberStyles.None, CultureInfo.InvariantCulture, out praefix))
+            {
+                if (a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || !System.Net.IPAddress.TryParse(m, out maske)) return false;
+                praefix = 0;
+                foreach (byte x in maske.GetAddressBytes()) for (int bit = 7; bit >= 0; bit--) if ((x & (1 << bit)) != 0) praefix++;
+            }
+            if (praefix < 0 || praefix > adr.Length * 8) return false;
+            lo = new byte[adr.Length]; hi = new byte[adr.Length];
+            for (int i = 0; i < adr.Length; i++)
+            {
+                int bits = Math.Max(0, Math.Min(8, praefix - i * 8));
+                byte behalten = (byte)(bits == 0 ? 0 : 0xFF << (8 - bits));
+                lo[i] = (byte)(adr[i] & behalten);
+                hi[i] = (byte)(adr[i] | ~behalten);
+            }
+            return true;
+        }
+
+        private static int Vergleich(byte[] x, byte[] y)
+        {
+            for (int i = 0; i < x.Length; i++) if (x[i] != y[i]) return x[i] < y[i] ? -1 : 1;
+            return 0;
+        }
+
+        private static object Lesen(object com, string eigenschaft)
+        {
+            return com.GetType().InvokeMember(eigenschaft, System.Reflection.BindingFlags.GetProperty, null, com, null);
+        }
+
+        private static int Zahl(object wert)
+        {
+            return wert == null ? 0 : Convert.ToInt32(wert, CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// Hinweis zur Firewall für die Karte „Webserver“ (leer = alles in Ordnung): Problem der eigenen Regel; „Öffentlich“
+        /// nur, wenn kein Netz als Privat oder Domäne eingestuft ist (CurrentProfileTypes enthält die Profile aller
+        /// Verbindungen, ein öffentlicher VPN- oder virtueller Adapter allein löst also nichts aus); andere bei Windows
+        /// registrierte Firewalls (z. B. ESET) mit dem freizugebenden Port. Fehler bei der Abfrage zeigen nichts an.
         /// </summary>
         public static string FirewallHinweis(int port)
         {
             var teile = new List<string>();
+            try
+            {
+                bool reparieren;
+                string problem = Zustand() == DienstZustand.NichtEingerichtet ? null : FirewallProblem(port, out reparieren);
+                if (problem != null) teile.Add(problem + " – „Speichern“ legt sie neu an.");
+            }
+            catch { }
             try
             {
                 var typ = Type.GetTypeFromProgID("HNetCfg.FwPolicy2");

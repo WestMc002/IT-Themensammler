@@ -28,10 +28,14 @@ Einrichten beim Kunden
    C:\Program Files\IT-Themensammler kopiert und als Dienst
    "IT-Themensammler" (Dienstname ITThemensammler) eingerichtet:
    Start automatisch (verzögert) mit Windows, auch ohne angemeldeten Benutzer,
-   Neustart bei Fehlern, Firewall-Regel für den Port (Domäne und Privat).
+   Neustart bei Fehlern, Firewall-Regel für den Port (nur TCP, nur dieses
+   Programm, Domäne und Privat, nur aus dem eigenen Teilnetz und privaten
+   Adressbereichen).
 5. Die angezeigte Adresse (z. B. http://server:8080/) an die Mitarbeiter geben.
 Zum Ausprobieren ohne Dienst: "Testweise starten" – der Webserver läuft dann
-nur, solange das Verwaltungsfenster offen ist.
+nur, solange das Verwaltungsfenster offen ist. Die Firewall-Regel gilt nur
+für das Programm des Dienstes; testweise ist der Webserver deshalb
+eventuell nur auf diesem Rechner erreichbar.
 Neue Version: neue EXE starten und "Dienst aktualisieren" wählen.
 "Entfernen" löscht Dienst, Firewall-Regel und den Programmordner unter
 C:\Program Files – die Daten bleiben erhalten.
@@ -319,6 +323,14 @@ aktualisieren". Das ZIP enthält dafür im Ordner "Update-von-1.22" eine Kopie
 der EXE unter dem früheren Namen (nur für das Update älterer Versionen).
 
 Versionen
+1.38  Firewall-Regel enger: nur TCP, nur das Programm des Dienstes, nur
+      Domäne und privates Netz, keine Verbindungen über das Internet (edge=no)
+      und nur aus dem eigenen Teilnetz bzw. privaten Adressbereichen; die
+      Regel für den Anwendungsproxy nur für die Connector-Adressen. Ältere
+      Regeln erneuert der Dienst beim Start selbst. Das Verwaltungsfenster
+      zeigt unter dem Port, wenn eine Regel fehlt oder zu weit gefasst ist;
+      Mustersuche in fremden Daten (Excel-Import, Verzeichnis, Weboberfläche,
+      Update) mit Zeitlimit
 1.37  Hinweis unter dem Port, wenn das Netzwerk als „Öffentlich“ eingestuft
       ist (die Firewall-Regel gilt nur für Domäne und privates Netz) oder
       zusätzlich eine andere Firewall (z. B. ESET) aktiv ist, mit dem

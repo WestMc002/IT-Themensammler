@@ -317,8 +317,8 @@ namespace ITThemensammler
 
         // ------------------------------------------------------------------ Schnittstelle
 
-        private static readonly Regex AnfragePfad = new Regex("^/api/anfragen/([0-9a-f]{32})(/erledigt)?$", RegexOptions.CultureInvariant);
-        private static readonly Regex BildPfad = new Regex("^/api/anfragen/([0-9a-f]{32})/bild$", RegexOptions.CultureInvariant);
+        private static readonly Regex AnfragePfad = new Regex("^/api/anfragen/([0-9a-f]{32})(/erledigt)?$", RegexOptions.CultureInvariant, Rx.Limit);
+        private static readonly Regex BildPfad = new Regex("^/api/anfragen/([0-9a-f]{32})/bild$", RegexOptions.CultureInvariant, Rx.Limit);
 
         private void Api(HttpListenerContext ctx, string pfad)
         {
@@ -709,7 +709,7 @@ namespace ITThemensammler
                 string gruppierung = Text(b, "gruppierung", 10, false);
                 if (gruppierung.Length > 0 && gruppierung != "ort" && gruppierung != "art" && gruppierung != "keine")
                     throw new WebFehler(400, "Gruppierung ungültig.");
-                if (mail.Length > 0 && !Regex.IsMatch(mail, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) throw new WebFehler(400, "Die E-Mail-Adresse ist ungültig.");
+                if (mail.Length > 0 && !Rx.IsMatch(mail, @"^[^@\s]+@[^@\s]+\.[^@\s]+$")) throw new WebFehler(400, "Die E-Mail-Adresse ist ungültig.");
                 string anmeldung = Text(b, "mitarbeiterAnmeldung", 10, false);
                 int loeschMonate = -1;
                 if (b.ContainsKey("loeschMonate") && (!int.TryParse(Text(b, "loeschMonate", 4, false), NumberStyles.None, CultureInfo.InvariantCulture, out loeschMonate) || loeschMonate > 120))
@@ -895,7 +895,7 @@ namespace ITThemensammler
         {
             // Besitz: über das angemeldete Domänenkonto oder über den Besitzer-Schlüssel dieses Browsers
             string schluessel = ctx.Request.Headers[SchluesselHeader] ?? "";
-            string pruef = Regex.IsMatch(schluessel, "^[0-9a-f]{48}$") ? Speicher.Pruefsumme(schluessel) : "";
+            string pruef = Rx.IsMatch(schluessel, "^[0-9a-f]{48}$") ? Speicher.Pruefsumme(schluessel) : "";
             var ma = Mitarbeiter(ctx);
             string ich = ma == null ? "" : ma.Konto;
             if (pruef.Length == 0 && ich.Length == 0) throw new WebFehler(403, "Dieses Thema kann nur der Ersteller oder ein Admin ändern.");
@@ -973,7 +973,7 @@ namespace ITThemensammler
             if (m != "PUT" && m != "DELETE") throw new WebFehler(405, "Nicht erlaubt.");
 
             string schluessel = ctx.Request.Headers[SchluesselHeader] ?? "";
-            string pruef = Regex.IsMatch(schluessel, "^[0-9a-f]{48}$") ? Speicher.Pruefsumme(schluessel) : "";
+            string pruef = Rx.IsMatch(schluessel, "^[0-9a-f]{48}$") ? Speicher.Pruefsumme(schluessel) : "";
             Func<Anfrage, bool> darf = a => admin != null ||
                 (a.erledigtAm.Length == 0 && ((ma != null && ma.Besitzt(a.ersteller)) || (pruef.Length > 0 && a.schluessel == pruef)));
             // erst die Berechtigung prüfen, dann das Bild annehmen
@@ -1632,7 +1632,7 @@ namespace ITThemensammler
         private static bool IstDatum(string t)
         {
             DateTime d;
-            return t != null && Regex.IsMatch(t, @"^\d{4}-\d{2}-\d{2}$") &&
+            return t != null && Rx.IsMatch(t, @"^\d{4}-\d{2}-\d{2}$") &&
                 DateTime.TryParseExact(t, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d);
         }
 

@@ -193,7 +193,7 @@ namespace ITThemensammler
         /// <summary>"OU=Mitarbeiter,OU=Rathaus,DC=gemeinde,DC=local" → "gemeinde.local › Rathaus › Mitarbeiter"</summary>
         public static string Pfad(string dn)
         {
-            var teile = Regex.Split(dn, @"(?<!\\),");
+            var teile = Rx.Split(dn, @"(?<!\\),");
             var domaene = new List<string>();
             var ous = new List<string>();
             foreach (string t in teile)
@@ -201,7 +201,7 @@ namespace ITThemensammler
                 int p = t.IndexOf('=');
                 if (p < 0) continue;
                 string art = t.Substring(0, p).Trim().ToUpperInvariant();
-                string wert = Regex.Replace(t.Substring(p + 1).Trim(), @"\\(.)", "$1");
+                string wert = Rx.Replace(t.Substring(p + 1).Trim(), @"\\(.)", "$1");
                 if (art == "DC") domaene.Add(wert);
                 else ous.Add(wert);
             }
@@ -234,7 +234,7 @@ namespace ITThemensammler
         /// <summary>Plausibler Distinguished Name einer OU bzw. eines Containers?</summary>
         public static bool IstDn(string dn)
         {
-            return dn != null && dn.Length <= 500 && Regex.IsMatch(dn, @"^(OU|CN)=.+,DC=[^,]+(,DC=[^,]+)*$", RegexOptions.IgnoreCase);
+            return dn != null && dn.Length <= 500 && Rx.IsMatch(dn, @"^(OU|CN)=.+,DC=[^,]+(,DC=[^,]+)*$", RegexOptions.IgnoreCase);
         }
     }
 }

@@ -645,7 +645,7 @@ namespace ITThemensammler
                     if (!System.Net.IPAddress.TryParse(ip, out a)) { _error.Text = "„" + ip + "“ ist keine gültige IP-Adresse."; return; }
                 }
                 foreach (string kz in new[] { kopfUpn, kopfName })
-                    if (!System.Text.RegularExpressions.Regex.IsMatch(kz, "^[A-Za-z][A-Za-z0-9-]{1,59}$"))
+                    if (!Rx.IsMatch(kz, "^[A-Za-z][A-Za-z0-9-]{1,59}$"))
                     {
                         _error.Text = "Ungültiger Name einer Kopfzeile: „" + kz + "“ (nur Buchstaben, Ziffern und Bindestrich).";
                         return;

@@ -248,7 +248,7 @@ namespace ITThemensammler
             if (values["Programm"] != "IT-Themensammler") { detail = "Das Manifest gehört zu „" + values["Programm"] + "“, nicht zu IT-Themensammler."; return Invalid; }
             if (values["Version"] != version) { detail = "Das Manifest nennt Version " + values["Version"] + ", das Release " + version + "."; return Invalid; }
             if (values["Datei"] != ZipName(version)) { detail = "Das Manifest nennt die Datei „" + values["Datei"] + "“."; return Invalid; }
-            if (!System.Text.RegularExpressions.Regex.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
+            if (!Rx.IsMatch(values["SHA256"], "^[0-9a-f]{64}$")) { detail = "Die Prüfsumme im Manifest ist ungültig."; return Invalid; }
             sha = values["SHA256"];
             return null;
         }
@@ -554,7 +554,7 @@ namespace ITThemensammler
             }
             for (; i < lines.Length && lines[i].StartsWith("Geplant ", StringComparison.Ordinal); i++)
             {
-                var g = System.Text.RegularExpressions.Regex.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
+                var g = Rx.Match(lines[i], @"^Geplant (\d+): Ziel: (.+)$");
                 if (!g.Success || g.Groups[1].Value != (planned.Count + 1).ToString(CultureInfo.InvariantCulture) || !allowed(g.Groups[2].Value)) return false;
                 if (planned.Exists(x => string.Equals(x, g.Groups[2].Value, StringComparison.OrdinalIgnoreCase))) return false;
                 planned.Add(g.Groups[2].Value);
@@ -565,14 +565,14 @@ namespace ITThemensammler
             for (; i < lines.Length; i++)
             {
                 string line = lines[i];
-                var e = System.Text.RegularExpressions.Regex.Match(line, @"^Ersetzt (\d+)$");
+                var e = Rx.Match(line, @"^Ersetzt (\d+)$");
                 if (e.Success)
                 {
                     if (list.Count == 0 || replacedLast || e.Groups[1].Value != list[list.Count - 1].N) return false;
                     replacedLast = true;
                     continue;
                 }
-                var m = System.Text.RegularExpressions.Regex.Match(line,
+                var m = Rx.Match(line,
                     @"^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$");
                 if (!m.Success) return false;
                 var entry = new JournalEntry { N = m.Groups[1].Value, Kind = m.Groups[2].Value, Dst = m.Groups[3].Value, Hash = m.Groups[4].Value, Tmp = m.Groups[5].Value };
@@ -1087,6 +1087,11 @@ try {
         // Dienst bzw. Verwaltungsfenster starten nur bei OK oder FEHLER. Nur ASCII-Anführungszeichen verwenden.
         private const string Script = @"
 $ErrorActionPreference = 'Stop'
+# Mustersuche auf fremden Daten (Journal, Manifest, Ordnernamen) mit Zeitlimit 250 ms; Zeitueberschreitung = nicht eindeutig pruefbar
+function Rx([string]$text, [string]$pattern) {
+  try { return [regex]::Match($text, $pattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant, [TimeSpan]::FromMilliseconds(250)) }
+  catch [System.Text.RegularExpressions.RegexMatchTimeoutException] { throw 'Nicht eindeutig pruefbar (Zeitlimit der Mustersuche).' }
+}
 # Dateien begrenzt lesen bzw. kopieren; waehrenddessen darf niemand schreiben (FileShare.Read). Bei Ueberschreitung Abbruch, Teilkopie weg.
 function Read-Limited([string]$path, [long]$max) {
   $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
@@ -1158,7 +1163,8 @@ try {
       if (-not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
         $o = (Get-Acl -LiteralPath $_.FullName).GetOwner([System.Security.Principal.SecurityIdentifier])
         if ($o -eq $admins -or $o -eq $system) {
-          if ($_.Name -match '^IT-Themensammler-Update-([0-9A-F]{24})-[0-9a-f]{32}$' -and $Matches[1] -ceq $TargetId) { $inactive = $true }
+          $nm = Rx $_.Name '^IT-Themensammler-Update-([0-9A-Fa-f]{24})-[0-9a-f]{32}$'
+          if ($nm.Success -and $nm.Groups[1].Value -eq $TargetId) { $inactive = $true }
           else { $inactive = $_.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddHours(-1) }
           if (Test-Path -LiteralPath (Join-Path $_.FullName 'Wiederherstellung-offen')) { $inactive = $false }
           if ($inactive) { [System.IO.Directory]::Delete($_.FullName, $true) }
@@ -1206,7 +1212,7 @@ try {
   $rsa.Clear()
   if (-not $valid) { throw 'Die Signatur des Updates ist ungueltig.' }
   if ($mv['Programm'] -cne 'IT-Themensammler' -or $mv['Version'] -cne $Version -or $mv['Datei'] -cne $AssetName) { throw 'Das Manifest passt nicht zu diesem Update.' }
-  if ($mv['SHA256'] -cnotmatch '^[0-9a-f]{64}$') { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
+  if (-not (Rx $mv['SHA256'] '^[0-9a-f]{64}$').Success) { throw 'Die Pruefsumme im Manifest ist ungueltig.' }
   $expected = $mv['SHA256'].ToUpperInvariant()
   if ($expected -ne $Sha256) { throw 'Die Pruefsumme im Manifest weicht von der Pruefung im Programm ab.' }
   # ZIP einmal oeffnen, Pruefsumme ueber genau diesen Stream berechnen und denselben Stream entpacken
@@ -1461,6 +1467,11 @@ try {
         // Update.log liegt im geschützten Datenordner (nicht im Arbeitsordner), deshalb dort immer schreiben.
         private const string RepairScript = @"
 $ErrorActionPreference = 'Stop'
+# Mustersuche auf fremden Daten (Journal, Manifest, Ordnernamen) mit Zeitlimit 250 ms; Zeitueberschreitung = nicht eindeutig pruefbar
+function Rx([string]$text, [string]$pattern) {
+  try { return [regex]::Match($text, $pattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant, [TimeSpan]::FromMilliseconds(250)) }
+  catch [System.Text.RegularExpressions.RegexMatchTimeoutException] { throw 'Nicht eindeutig pruefbar (Zeitlimit der Mustersuche).' }
+}
 $result = $null
 $noRestart = $false
 $stopped = $false
@@ -1520,12 +1531,13 @@ try {
   $lines = [System.IO.File]::ReadAllLines($journal)
   if ($lines.Count -lt 2 -or -not $lines[0].StartsWith('IT-Themensammler ') -or -not $lines[0].EndsWith(' - Wiederherstellungsjournal') -or $lines[1] -cne 'Journalformat 2') { throw 'Das Journal ist nicht lesbar.' }
   $i = 2
-  while ($i -lt $lines.Count -and -not $lines[$i].StartsWith('Geplant ')) { if ($lines[$i] -cmatch $keywords) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
+  while ($i -lt $lines.Count -and -not $lines[$i].StartsWith('Geplant ')) { if ((Rx $lines[$i] $keywords).Success) { throw 'Das Journal ist nicht lesbar.' }; $i++ }
   $planned = @()
   while ($i -lt $lines.Count -and $lines[$i].StartsWith('Geplant ')) {
-    if ($lines[$i] -cnotmatch '^Geplant (\d+): Ziel: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
-    if ($Matches[1] -ne [string]($planned.Count + 1) -or $allowed -notcontains $Matches[2] -or $planned -contains $Matches[2]) { throw 'Unerwarteter Eintrag im Journal.' }
-    $planned += $Matches[2]
+    $g = Rx $lines[$i] '^Geplant (\d+): Ziel: (.+)$'
+    if (-not $g.Success) { throw 'Das Journal ist nicht lesbar.' }
+    if ($g.Groups[1].Value -ne [string]($planned.Count + 1) -or $allowed -notcontains $g.Groups[2].Value -or $planned -contains $g.Groups[2].Value) { throw 'Unerwarteter Eintrag im Journal.' }
+    $planned += $g.Groups[2].Value
     $i++
   }
   if ($planned.Count -eq 0 -or $i -ge $lines.Count -or $lines[$i] -cne 'Bereit') { throw 'Das Journal ist unvollstaendig.' }
@@ -1534,13 +1546,15 @@ try {
   $replacedLast = $true
   for (; $i -lt $lines.Count; $i++) {
     $line = $lines[$i]
-    if ($line -cmatch '^Ersetzt (\d+)$') {
-      if ($entries.Count -eq 0 -or $replacedLast -or $Matches[1] -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
+    $x = Rx $line '^Ersetzt (\d+)$'
+    if ($x.Success) {
+      if ($entries.Count -eq 0 -or $replacedLast -or $x.Groups[1].Value -ne $entries[$entries.Count - 1].N) { throw 'Das Journal ist nicht lesbar.' }
       $replacedLast = $true
       continue
     }
-    if ($line -cnotmatch '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$') { throw 'Das Journal ist nicht lesbar.' }
-    $e = @{ N = $Matches[1]; Kind = $Matches[2]; Dst = $Matches[3]; Hash = [string]$Matches[4]; Tmp = $Matches[5] }
+    $v = Rx $line '^Vorher (\d+): (Sicherung|Neu) \| Ziel: (.+?)(?: \| Sicherungsdatei: .+? \| SHA256: ([0-9A-F]{64}))? \| Hilfsdatei: (.+)$'
+    if (-not $v.Success) { throw 'Das Journal ist nicht lesbar.' }
+    $e = @{ N = $v.Groups[1].Value; Kind = $v.Groups[2].Value; Dst = $v.Groups[3].Value; Hash = $v.Groups[4].Value; Tmp = $v.Groups[5].Value }
     if ($e.N -ne [string]($entries.Count + 1) -or ($entries.Count -gt 0 -and -not $replacedLast) -or $allowed -notcontains $e.Dst) { throw 'Unerwarteter Eintrag im Journal.' }
     if ($entries.Count -ge $planned.Count -or $planned[$entries.Count] -ne $e.Dst) { throw 'Unerwarteter Eintrag im Journal.' }
     if ($e.Kind -eq 'Sicherung' -and $e.Hash.Length -eq 0) { throw 'Das Journal ist nicht lesbar.' }

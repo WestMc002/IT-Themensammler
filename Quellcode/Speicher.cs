@@ -17,6 +17,40 @@ using System.Web.Script.Serialization;
 
 namespace ITThemensammler
 {
+    /// <summary>
+    /// Mustersuche auf fremden Daten (Dateien, Sicherungen, Netz, Verzeichnis, Journal, Manifest) mit Zeitlimit 250 ms.
+    /// Eine Zeitüberschreitung gilt als „nicht eindeutig prüfbar“: IsMatch und Match liefern „passt nicht“ (Ablehnung),
+    /// Replace und Split werfen InvalidDataException (der Vorgang bricht ab).
+    /// </summary>
+    internal static class Rx
+    {
+        public static readonly TimeSpan Limit = TimeSpan.FromMilliseconds(250);
+
+        public static bool IsMatch(string text, string muster, System.Text.RegularExpressions.RegexOptions optionen = System.Text.RegularExpressions.RegexOptions.None)
+        {
+            try { return text != null && System.Text.RegularExpressions.Regex.IsMatch(text, muster, optionen | System.Text.RegularExpressions.RegexOptions.CultureInvariant, Limit); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return false; }
+        }
+
+        public static System.Text.RegularExpressions.Match Match(string text, string muster)
+        {
+            try { return System.Text.RegularExpressions.Regex.Match(text ?? "", muster, System.Text.RegularExpressions.RegexOptions.CultureInvariant, Limit); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { return System.Text.RegularExpressions.Match.Empty; }
+        }
+
+        public static string Replace(string text, string muster, string ersatz)
+        {
+            try { return System.Text.RegularExpressions.Regex.Replace(text ?? "", muster, ersatz, System.Text.RegularExpressions.RegexOptions.CultureInvariant, Limit); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { throw new InvalidDataException("Nicht eindeutig prüfbar (Zeitlimit der Mustersuche)."); }
+        }
+
+        public static string[] Split(string text, string muster)
+        {
+            try { return System.Text.RegularExpressions.Regex.Split(text ?? "", muster, System.Text.RegularExpressions.RegexOptions.CultureInvariant, Limit); }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException) { throw new InvalidDataException("Nicht eindeutig prüfbar (Zeitlimit der Mustersuche)."); }
+        }
+    }
+
     // Feldnamen klein geschrieben: so bleibt daten.json mit dem bisherigen Entwurf (PowerShell-Webserver) verträglich.
 
     /// <summary>Ein eingetragenes Thema.</summary>
@@ -276,7 +310,7 @@ namespace ITThemensammler
 
         public static bool GueltigeId(string id)
         {
-            return id != null && System.Text.RegularExpressions.Regex.IsMatch(id, "^[0-9a-f]{32}$");
+            return id != null && Rx.IsMatch(id, "^[0-9a-f]{32}$");
         }
         /// <summary>Archiv gelöschter erledigter Themen (Themen-JJJJ.csv), falls eingeschaltet.</summary>
         public static string ArchivOrdner { get { return Path.Combine(Ordner, "Archiv"); } }

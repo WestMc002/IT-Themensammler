@@ -200,7 +200,7 @@ namespace ITThemensammler
             var zeilen = new Dictionary<int, Dictionary<string, Zelle>>();
             foreach (var c in doc.Root.Descendants(Main + "c"))
             {
-                var m = Regex.Match((string)c.Attribute("r") ?? "", "^([A-Z]+)([0-9]+)$");
+                var m = Rx.Match((string)c.Attribute("r") ?? "", "^([A-Z]+)([0-9]+)$");
                 if (!m.Success) continue;
                 int nr = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
                 string typ = (string)c.Attribute("t") ?? "";
@@ -260,7 +260,7 @@ namespace ITThemensammler
             if (z.Zahl.HasValue && z.Zahl.Value > 1000 && z.Zahl.Value < 100000) return AusZahl(z.Zahl.Value);
             string t = (z.Text ?? "").Trim();
             if (t.Length == 0) return "";
-            var m = Regex.Match(t, @"(\d{1,2})\.(\d{1,2})\.(\d{4})");
+            var m = Rx.Match(t, @"(\d{1,2})\.(\d{1,2})\.(\d{4})");
             if (m.Success)
             {
                 DateTime d;
@@ -281,14 +281,14 @@ namespace ITThemensammler
 
         private static string Einzeilig(string s)
         {
-            return Regex.Replace(s ?? "", @"\s+", " ").Trim();
+            return Rx.Replace(s ?? "", @"\s+", " ").Trim();
         }
 
         private static string Mehrzeilig(string s)
         {
             s = (s ?? "").Replace("\r\n", "\n").Replace("\r", "\n");
-            s = Regex.Replace(s, @"[ \t]+", " ");
-            s = Regex.Replace(s, @" ?\n ?", "\n");
+            s = Rx.Replace(s, @"[ \t]+", " ");
+            s = Rx.Replace(s, @" ?\n ?", "\n");
             return s.Trim();
         }
 
